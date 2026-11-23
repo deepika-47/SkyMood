@@ -1,0 +1,12 @@
+{
+  "name": "skymood",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SkyMood — know the sky, plan your day. A lifestyle weather app with live WeatherAPI data.",
+  "scripts": {
+    "dev": "python tools/dev_server.py"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

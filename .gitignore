@@ -1,0 +1,15 @@
+# Dependencies / tooling
+node_modules/
+.vercel/
+.venv/
+__pycache__/
+
+# Local secrets — set WEATHER_API_KEY in the hosting dashboard instead
+.env
+.env.local
+.env.*.local
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.log
