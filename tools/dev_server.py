@@ -14,7 +14,6 @@ import json
 import mimetypes
 import os
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -23,9 +22,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(ROOT, ".env")
 WEATHER_BASE = "https://api.weatherapi.com/v1"
-CACHE_TTL = 45
-CACHE: dict[str, tuple[float, dict]] = {}
 ALLOWED_EXTENSIONS = {".html", ".css", ".js", ".svg", ".png", ".ico", ".json", ".webmanifest", ".txt"}
+KEY_ERROR_CODES = {1002, 1007, 2006, 2008, 2009, 2010}
+BAD_REQUEST_CODES = {1003, 1004, 1005}
 
 
 def load_env() -> None:
@@ -62,19 +61,22 @@ def map_error(status: int, body: dict) -> UpstreamError:
         return UpstreamError(404, "CITY_NOT_FOUND", "No location matched that city name.")
     if provider_code == 2007 or status == 429:
         return UpstreamError(429, "RATE_LIMITED", "The weather service request limit was reached.")
-    if provider_code in {1002, 1003, 2006, 2007, 2008, 2009, 2010} or status in {401, 403}:
+    if provider_code in KEY_ERROR_CODES or status in {401, 403}:
         return UpstreamError(500, "INVALID_API_KEY", "The WeatherAPI key is missing, invalid or out of quota.")
-    if provider_code in {1003, 1004, 1007}:
+    if provider_code in BAD_REQUEST_CODES:
         return UpstreamError(400, "BAD_REQUEST", "The city query was rejected.")
     if status >= 500:
         return UpstreamError(502, "SERVICE_UNAVAILABLE", "WeatherAPI is temporarily unavailable.")
     return UpstreamError(502, "UPSTREAM_UNAVAILABLE", "Unexpected upstream response.")
 
 
-def fetch_json(path: str, params: dict[str, str]) -> dict:
-    query = dict(params)
-    query["key"] = os.environ.get("WEATHER_API_KEY", "")
-    url = f"{WEATHER_BASE}{path}?{urllib.parse.urlencode(query)}"
+def fetch_current(query: str) -> dict:
+    params = {
+        "key": os.environ.get("WEATHER_API_KEY", ""),
+        "q": query,
+        "aqi": "no",
+    }
+    url = f"{WEATHER_BASE}/current.json?{urllib.parse.urlencode(params)}"
     request = urllib.request.Request(
         url,
         headers={"Accept": "application/json", "User-Agent": "SkyMood-dev-server/1.0"},
@@ -84,6 +86,8 @@ def fetch_json(path: str, params: dict[str, str]) -> dict:
             payload = json.loads(response.read().decode("utf-8"))
             if payload.get("error"):
                 raise map_error(200, payload)
+            if not isinstance(payload.get("location"), dict) or not isinstance(payload.get("current"), dict):
+                raise UpstreamError(502, "UNEXPECTED_RESPONSE", "WeatherAPI returned an incomplete response.")
             return payload
     except urllib.error.HTTPError as error:
         try:
@@ -97,28 +101,6 @@ def fetch_json(path: str, params: dict[str, str]) -> dict:
         raise UpstreamError(502, "SERVICE_UNAVAILABLE", f"Could not reach WeatherAPI: {error}") from error
 
 
-def get_weather(query: str) -> dict:
-    cache_key = query.lower()
-    now = time.time()
-    cached = CACHE.get(cache_key)
-    if cached and cached[0] > now:
-        return cached[1]
-
-    current = fetch_json("/current.json", {"q": query, "aqi": "no"})
-    forecast = fetch_json("/forecast.json", {"q": query, "days": "5", "aqi": "no", "alerts": "no"})
-
-    payload = {
-        "ok": True,
-        "requestedQuery": query,
-        "provider": "WeatherAPI.com",
-        "fetchedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "endpoints": ["/v1/current.json", "/v1/forecast.json?days=5"],
-        "data": {"current": current, "forecast": forecast},
-    }
-    CACHE[cache_key] = (now + CACHE_TTL, payload)
-    return payload
-
-
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
@@ -126,12 +108,15 @@ class Handler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         super().end_headers()
 
     def send_json(self, status: int, payload: dict) -> None:
-        body = json.dumps(payload).encode("utf-8")
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("X-Weather-Provider", "WeatherAPI.com")
+        self.send_header("X-Weather-Endpoint", "/v1/current.json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -140,7 +125,12 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
 
         if parsed.path == "/api/weather":
-            self.handle_weather(parsed)
+            try:
+                self.handle_weather(parsed)
+            except (BrokenPipeError, ConnectionAbortedError):
+                # The browser aborted an in-flight search (for example when a
+                # newer query superseded it). Nothing left to send.
+                pass
             return
 
         parts = [part for part in parsed.path.split("/") if part]
@@ -173,7 +163,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         try:
-            self.send_json(200, get_weather(query))
+            self.send_json(200, fetch_current(query))
         except UpstreamError as error:
             self.send_json(
                 error.status,

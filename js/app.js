@@ -1,6 +1,6 @@
 /* =========================================================
    SkyMood — app logic (vanilla JS, no dependencies)
-   Data: WeatherAPI.com through /api/weather (key stays server-side)
+   Data: WeatherAPI.com /v1/current.json through /api/weather
    ========================================================= */
 
 (() => {
@@ -22,28 +22,21 @@
       "Ahmedabad",
       "New York",
       "London",
-      "Tokyo",
     ],
-    HOURLY_COUNT: 24,
     FETCH_TIMEOUT_MS: 15000,
     TOAST_MS: 2400,
   });
 
-  /* Interpretation thresholds. Priority is applied top-down in deriveVibe(). */
+  /* Interpretation thresholds. Priority is applied top-down in deriveMood(). */
   const THRESHOLDS = Object.freeze({
     COLD_C: 15,
     HOT_C: 32,
-    HIGH_UV: 7,
     BREEZE_MIN_KPH: 20,
-    BREEZE_MIN_C: 18,
-    BREEZE_MAX_C: 25,
-    PLEASANT_MIN_C: 22,
-    PLEASANT_MAX_C: 31,
   });
 
-  /* WeatherAPI resolves some bare city names to unexpected places (e.g.
-     "Delhi" → Ontario, Canada). Qualify the preset cities for a predictable
-     match while still letting users type a fully qualified query. */
+  /* WeatherAPI can resolve a bare "Delhi" to a different place. Presets and
+     matching typed searches are qualified so the result stays predictable,
+     while the search field still shows what the person typed. */
   const CITY_QUERY_ALIASES = Object.freeze({
     mumbai: "Mumbai, India",
     delhi: "Delhi, India",
@@ -55,65 +48,39 @@
     ahmedabad: "Ahmedabad, India",
     "new york": "New York, United States",
     london: "London, United Kingdom",
-    tokyo: "Tokyo, Japan",
   });
 
   const MOODS = Object.freeze({
-    hot: {
-      key: "hot",
-      emoji: "☀️",
-      title: "Sun Alert",
-      short: "Sun",
-      label: "Scorching / high UV",
-      text: "Don't get eaten by the sun today—stay shaded and hydrated!",
+    cold: {
+      key: "cold",
+      emoji: "❄️",
+      title: "Freeze Frame",
+      text: "Bone-chilling cold ahead, cuddle up tight😉",
     },
     clear: {
       key: "clear",
       emoji: "🌤️",
       title: "Perfect Day",
-      short: "Clear",
-      label: "Clear / pleasant",
-      text: "Clear skies ahead—plan a day out with your loved ones!",
+      text: "The weather looks great! Time to plan a day out with your loved ones🫂",
     },
-    breeze: {
-      key: "breeze",
-      emoji: "🌀",
-      title: "Breezy Mode",
-      short: "Breeze",
-      label: "Cool breeze",
-      text: "A cool breeze that touches your soul—step outside and enjoy!",
+    hot: {
+      key: "hot",
+      emoji: "☀️",
+      title: "Sun Alert",
+      text: "Don't get eaten by the sun today! Stay hydrated and slap on some SPF🌞",
     },
     rain: {
       key: "rain",
       emoji: "☔",
       title: "Rain Check",
-      short: "Rain",
-      label: "Rainy / stormy",
-      text: "Step out with an umbrella—don't get soaked!",
+      text: "Step out with an umbrella — don't get soaked☔",
     },
-    cold: {
-      key: "cold",
-      emoji: "❄️",
-      title: "Freeze Frame",
-      short: "Cold",
-      label: "Bone-chilling cold",
-      text: "Bone-chilling cold outside—cuddle up tight!",
+    breeze: {
+      key: "breeze",
+      emoji: "🌀",
+      title: "Breezy Mode",
+      text: "A cool breeze that touches your soul — step outside🌀",
     },
-    night: {
-      key: "night",
-      emoji: "🌙",
-      title: "Starry Night",
-      short: "Night",
-      label: "Clear night",
-      text: "Starry skies ahead—sleep tight!",
-    },
-  });
-
-  /* Used when live conditions fall between the six defined moods. */
-  const FALLBACK_VIBE = Object.freeze({
-    ...MOODS.clear,
-    title: "Easy Going",
-    text: "Mild and steady—a good day to head outside!",
   });
 
   const GRADIENTS = Object.freeze({
@@ -122,7 +89,6 @@
     breeze: "linear-gradient(180deg, #2DD4BF 0%, #3B82F6 100%)",
     rain: "linear-gradient(180deg, #334155 0%, #0F172A 100%)",
     cold: "linear-gradient(180deg, #1E3A8A 0%, #312E81 100%)",
-    night: "linear-gradient(180deg, #0F172A 0%, #1E1B4B 100%)",
   });
 
   const THEME_COLORS = Object.freeze({
@@ -131,7 +97,6 @@
     breeze: "#2DD4BF",
     rain: "#334155",
     cold: "#1E3A8A",
-    night: "#0F172A",
   });
 
   const GENERIC_ICON =
@@ -144,27 +109,31 @@
     CITY_NOT_FOUND: {
       title: "City not found",
       retryable: false,
-      message: (query) => `We couldn't find “${query}”. Check the spelling and try a nearby city.`,
+      message: (query) => `We couldn't find “${query}”. Check the spelling and try another city.`,
     },
     INVALID_API_KEY: {
       title: "API configuration error",
       retryable: false,
-      message: () => "The WeatherAPI key is missing or invalid. Add a valid WEATHER_API_KEY in the environment and redeploy.",
+      message: () =>
+        "The WeatherAPI key is missing or invalid. Add a valid WEATHER_API_KEY in the environment and redeploy.",
     },
     API_KEY_MISSING: {
       title: "API configuration error",
       retryable: false,
-      message: () => "The WeatherAPI key is missing or invalid. Add a valid WEATHER_API_KEY in the environment and redeploy.",
+      message: () =>
+        "The WeatherAPI key is missing or invalid. Add a valid WEATHER_API_KEY in the environment and redeploy.",
     },
     RATE_LIMITED: {
-      title: "Weather service is busy",
+      title: "Temporary service error",
       retryable: true,
-      message: () => "We've reached the WeatherAPI request limit. Give it a moment, then try again.",
+      message: () =>
+        "The weather service is receiving too many requests right now. Give it a moment, then try again.",
     },
     NETWORK: {
       title: "No internet connection",
       retryable: true,
-      message: () => "SkyMood couldn't reach the weather service. Check your connection and try again.",
+      message: () =>
+        "SkyMood couldn't reach the weather service. Check your connection and try again.",
     },
     TIMEOUT: {
       title: "The sky is taking too long",
@@ -174,12 +143,17 @@
     SERVICE_UNAVAILABLE: {
       title: "Service unavailable",
       retryable: true,
-      message: () => "WeatherAPI is temporarily unavailable. Please try again shortly.",
+      message: () => "The weather service is temporarily unavailable. Please try again shortly.",
     },
     UPSTREAM_UNAVAILABLE: {
       title: "Service unavailable",
       retryable: true,
-      message: () => "WeatherAPI is temporarily unavailable. Please try again shortly.",
+      message: () => "The weather service is temporarily unavailable. Please try again shortly.",
+    },
+    UNEXPECTED_RESPONSE: {
+      title: "Unexpected response",
+      retryable: true,
+      message: () => "The weather service returned data we couldn't read. Please try again.",
     },
     BAD_RESPONSE: {
       title: "Unexpected response",
@@ -189,7 +163,12 @@
     BAD_REQUEST: {
       title: "That search needs a tweak",
       retryable: false,
-      message: () => "Enter a city name and try again.",
+      message: () => "Enter a city name using letters, numbers and simple punctuation.",
+    },
+    METHOD_NOT_ALLOWED: {
+      title: "Unexpected response",
+      retryable: true,
+      message: () => "The weather request could not be completed. Please try again.",
     },
     UNEXPECTED: {
       title: "Something went wrong",
@@ -204,16 +183,14 @@
     weather: null,
     requestedQuery: CONFIG.DEFAULT_CITY,
     lastFailedQuery: null,
-    previewMood: "auto",
     loading: false,
     requestSeq: 0,
     controller: null,
-    theme: "clear",
+    theme: "",
     frontLayer: "a",
     json: { formatted: "", raw: "", tab: "formatted" },
     clockTimer: null,
     toastTimer: null,
-    copyTimer: null,
     initialized: false,
   };
 
@@ -254,17 +231,12 @@
     tempC: $("tempC"),
     condIcon: $("condIcon"),
     condText: $("condText"),
-    hiLo: $("hiLo"),
     lastUpdatedPill: $("lastUpdatedPill"),
     vibeCard: $("vibeCard"),
     vibeEmoji: $("vibeEmoji"),
     vibeTitle: $("vibeTitle"),
     vibeText: $("vibeText"),
     vibeReason: $("vibeReason"),
-    vibePreviewBadge: $("vibePreviewBadge"),
-    copyVibeBtn: $("copyVibeBtn"),
-    feelsLike: $("feelsLike"),
-    feelsLikeSub: $("feelsLikeSub"),
     humidity: $("humidity"),
     humiditySub: $("humiditySub"),
     wind: $("wind"),
@@ -277,11 +249,6 @@
     windDetail: $("windDetail"),
     tempF: $("tempF"),
     updated: $("updated"),
-    hourlyTrack: $("hourlyTrack"),
-    hourlyCity: $("hourlyCity"),
-    outlookGrid: $("outlookGrid"),
-    outlookTitle: $("outlookTitle"),
-    outlookSub: $("outlookSub"),
     jsonSection: $("jsonSection"),
     jsonToggle: $("jsonToggle"),
     jsonPanel: $("jsonPanel"),
@@ -291,9 +258,6 @@
     copyJsonBtn: $("copyJsonBtn"),
     tabFormatted: $("tabFormatted"),
     tabRaw: $("tabRaw"),
-    moodBtn: $("moodPreviewBtn"),
-    moodPanel: $("moodPreviewPanel"),
-    moodOptions: $("moodOptions"),
     liveRegion: $("liveRegion"),
     toast: $("toast"),
   };
@@ -312,15 +276,13 @@
     if (node && node.textContent !== String(value)) node.textContent = String(value);
   }
 
-  function round(value) {
-    const n = Number(value);
-    return Number.isFinite(n) ? Math.round(n) : 0;
-  }
-
-  function decimal(value, digits = 1) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "—";
-    return n.toFixed(digits).replace(/\.0$/, "");
+  function numberText(value, maxFractionDigits = 0) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "—";
+    return new Intl.NumberFormat("en-US", {
+      maximumFractionDigits: maxFractionDigits,
+      minimumFractionDigits: 0,
+    }).format(number);
   }
 
   function normalizeName(value) {
@@ -351,39 +313,18 @@
 
   function relativeAgo(epochSeconds) {
     const diff = Math.max(0, Math.floor(Date.now() / 1000 - Number(epochSeconds)));
+    if (!Number.isFinite(diff)) return "";
     if (diff < 60) return "just now";
     if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
     return `${Math.floor(diff / 86400)} d ago`;
   }
 
-  function hourLabelFromApi(apiTime, isNow) {
-    if (isNow) return "Now";
-    const timePart = String(apiTime || "").split(" ")[1] || "";
-    const hour = Number(timePart.split(":")[0]);
-    if (!Number.isFinite(hour)) return "—";
-    if (hour === 0) return "12 AM";
-    if (hour === 12) return "12 PM";
-    return hour > 12 ? `${hour - 12} PM` : `${hour} AM`;
-  }
-
-  function dateLabel(apiDate) {
-    const parsed = new Date(`${apiDate}T12:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) return "—";
-    return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-  }
-
-  function weekdayLabel(apiDate, index) {
-    if (index === 0) return "Today";
-    const parsed = new Date(`${apiDate}T12:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) return "—";
-    return parsed.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
-  }
-
   function safeIcon(raw) {
     if (typeof raw !== "string" || !raw) return GENERIC_ICON;
-    const url = raw.startsWith("//") ? `https:${raw}` : raw;
-    return url.startsWith("https://cdn.weatherapi.com/") ? url : GENERIC_ICON;
+    const absolute = raw.startsWith("//") ? `https:${raw}` : raw;
+    if (!absolute.startsWith("https://cdn.weatherapi.com/")) return GENERIC_ICON;
+    return absolute.replace("/64x64/", "/128x128/");
   }
 
   function setIcon(img, raw, alt) {
@@ -427,7 +368,7 @@
         return true;
       }
     } catch {
-      /* fall through to legacy copy */
+      /* Fall through to the legacy copy path. */
     }
     try {
       const area = document.createElement("textarea");
@@ -438,9 +379,9 @@
       area.style.opacity = "0";
       document.body.appendChild(area);
       area.select();
-      const ok = document.execCommand("copy");
+      const copied = document.execCommand("copy");
       area.remove();
-      return ok;
+      return copied;
     } catch {
       return false;
     }
@@ -449,112 +390,82 @@
   /* ----------------------------- Weather model ----------------------------- */
 
   function normalizeWeather(payload) {
-    const currentBody = payload && payload.data && payload.data.current;
-    const forecastBody = payload && payload.data && payload.data.forecast;
-
-    if (!currentBody || !currentBody.location || !currentBody.current) {
-      throw new AppError("BAD_RESPONSE", "Missing current weather");
-    }
-    if (!forecastBody || !forecastBody.forecast || !Array.isArray(forecastBody.forecast.forecastday)) {
-      throw new AppError("BAD_RESPONSE", "Missing forecast");
-    }
-
-    const loc = currentBody.location;
-    const cur = currentBody.current;
-    const days = forecastBody.forecast.forecastday;
-    const today = days[0];
-
-    if (!today || !today.day || typeof cur.temp_c !== "number") {
-      throw new AppError("BAD_RESPONSE", "Incomplete weather data");
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      !payload.location ||
+      !payload.current
+    ) {
+      throw new AppError("BAD_RESPONSE", "Missing location or current weather");
     }
 
-    const nowEpoch = Math.floor(Date.now() / 1000);
-    const hours = [];
-    for (const day of days) {
-      if (!Array.isArray(day.hour)) continue;
-      for (const hour of day.hour) {
-        if (typeof hour.time_epoch === "number" && hour.time_epoch >= nowEpoch - 3600) {
-          hours.push(hour);
-        }
-      }
-    }
+    const location = payload.location;
+    const current = payload.current;
 
-    /* Guard against device/server clock skew: still offer a usable strip. */
-    if (hours.length < 6) {
-      for (const day of days[0].hour || []) hours.push(day);
+    const numericFields = [
+      current.temp_c,
+      current.temp_f,
+      current.humidity,
+      current.wind_kph,
+      current.uv,
+      current.cloud,
+      current.vis_km,
+      current.pressure_mb,
+      current.last_updated_epoch,
+    ];
+
+    if (
+      typeof location.name !== "string" ||
+      typeof location.tz_id !== "string" ||
+      !current.condition ||
+      typeof current.condition.text !== "string" ||
+      numericFields.some((value) => !Number.isFinite(Number(value)))
+    ) {
+      throw new AppError("BAD_RESPONSE", "Incomplete current weather");
     }
 
     return {
-      requestedQuery: (payload.requestedQuery || loc.name || "").trim(),
-      city: loc.name,
-      region: loc.region,
-      country: loc.country,
-      tz: loc.tz_id,
-      localtime: loc.localtime,
-      localEpoch: loc.localtime_epoch,
-      tempC: cur.temp_c,
-      tempF: cur.temp_f,
-      feelsC: cur.feelslike_c,
-      humidity: cur.humidity,
-      windKph: cur.wind_kph,
-      windDir: cur.wind_dir,
-      gustKph: cur.gust_kph,
-      uv: cur.uv,
-      cloud: cur.cloud,
-      visKm: cur.vis_km,
-      pressureMb: cur.pressure_mb,
-      dewpointC: cur.dewpoint_c,
-      condition: cur.condition ? cur.condition.text : "",
-      conditionIcon: cur.condition ? cur.condition.icon : "",
-      isDay: Boolean(cur.is_day),
-      lastUpdated: cur.last_updated,
-      lastUpdatedEpoch: cur.last_updated_epoch,
-      today: {
-        maxC: today.day.maxtemp_c,
-        minC: today.day.mintemp_c,
-        rainChance: today.day.daily_chance_of_rain,
-      },
-      hours: hours.slice(0, CONFIG.HOURLY_COUNT),
-      days: days.slice(0, 5),
-      fetchedAt: payload.fetchedAt || new Date().toISOString(),
+      city: location.name,
+      region: location.region || "",
+      country: location.country || "",
+      tz: location.tz_id,
+      tempC: Number(current.temp_c),
+      tempF: Number(current.temp_f),
+      humidity: Number(current.humidity),
+      windKph: Number(current.wind_kph),
+      windDir: current.wind_dir || "",
+      gustKph: Number.isFinite(Number(current.gust_kph)) ? Number(current.gust_kph) : null,
+      uv: Number(current.uv),
+      cloud: Number(current.cloud),
+      visKm: Number(current.vis_km),
+      pressureMb: Number(current.pressure_mb),
+      condition: current.condition.text,
+      conditionIcon: current.condition.icon || "",
+      isDay: Number(current.is_day) === 1,
+      lastUpdatedEpoch: Number(current.last_updated_epoch),
+      fetchedAt: Date.now(),
     };
   }
 
-  /* Priority order: rain/storm → snow/cold → clear night → scorching → breeze → pleasant. */
-  function deriveVibe(weather) {
-    const t = Number(weather.tempC);
-    const uv = Number(weather.uv) || 0;
-    const wind = Number(weather.windKph) || 0;
+  /* Priority when conditions overlap:
+     1. Snow / ice / freezing                         → Freeze Frame
+     2. Rain / drizzle / showers / thunder / storms   → Rain Check
+     3. Below 15°C                                    → Freeze Frame
+     4. Above 32°C                                    → Sun Alert
+     5. Wind at or above 20 km/h                      → Breezy Mode
+     6. Everything else                               → Perfect Day
+     The first matching rule wins. */
+  function deriveMood(weather) {
+    const temperature = Number(weather.tempC);
+    const wind = Number(weather.windKph);
     const condition = String(weather.condition || "").toLowerCase();
 
-    const isWet = /rain|drizzle|thunder|storm|shower|sleet/.test(condition);
-    const isSnowy = /snow|ice|blizzard|freezing/.test(condition);
-    const isClear = /clear|sunny/.test(condition);
-    const isClearish = /clear|sunny|partly cloudy/.test(condition);
-
-    if (isWet) return MOODS.rain;
-    if (isSnowy || t < THRESHOLDS.COLD_C) return MOODS.cold;
-    if (!weather.isDay && isClear) return MOODS.night;
-    if (t > THRESHOLDS.HOT_C || uv > THRESHOLDS.HIGH_UV) return MOODS.hot;
-    if (
-      wind >= THRESHOLDS.BREEZE_MIN_KPH &&
-      t >= THRESHOLDS.BREEZE_MIN_C &&
-      t <= THRESHOLDS.BREEZE_MAX_C
-    ) {
-      return MOODS.breeze;
-    }
-    if (t >= THRESHOLDS.PLEASANT_MIN_C && t <= THRESHOLDS.PLEASANT_MAX_C && isClearish) {
-      return MOODS.clear;
-    }
-    return FALLBACK_VIBE;
-  }
-
-  function activeVibe() {
-    if (!state.weather) return null;
-    if (state.previewMood !== "auto") {
-      return { ...MOODS[state.previewMood], forced: true };
-    }
-    return { ...deriveVibe(state.weather), forced: false };
+    if (/snow|blizzard|sleet|freezing|\bice\b/.test(condition)) return MOODS.cold;
+    if (/rain|drizzle|shower|thunder|storm/.test(condition)) return MOODS.rain;
+    if (temperature < THRESHOLDS.COLD_C) return MOODS.cold;
+    if (temperature > THRESHOLDS.HOT_C) return MOODS.hot;
+    if (wind >= THRESHOLDS.BREEZE_MIN_KPH) return MOODS.breeze;
+    return MOODS.clear;
   }
 
   /* ----------------------------- Theme (sky) ----------------------------- */
@@ -580,50 +491,53 @@
     if (els.themeMeta) els.themeMeta.setAttribute("content", THEME_COLORS[key]);
   }
 
-  /* ----------------------------- Render ----------------------------- */
+  /* ----------------------------- Rendering ----------------------------- */
 
   function updateClock() {
     if (!state.weather) return;
     setText(els.localTime, clockLabel(Date.now() / 1000, state.weather.tz));
   }
 
-  function renderVibe() {
-    const vibe = activeVibe();
-    if (!vibe) return;
-    const w = state.weather;
-
-    setText(els.vibeEmoji, vibe.emoji);
-    setText(els.vibeTitle, vibe.title);
-    setText(els.vibeText, vibe.text);
-    els.vibeCard.dataset.mood = vibe.key;
-    els.vibeCard.dataset.emoji = vibe.emoji;
-    els.vibePreviewBadge.hidden = !vibe.forced;
-
-    const parts = [
-      w.condition,
-      `${decimal(w.tempC)}°C`,
-      `${decimal(w.windKph)} km/h wind`,
-      `UV ${decimal(w.uv)}`,
-    ].filter(Boolean);
-    setText(els.vibeReason, parts.join(" · "));
+  function uvDescriptor(uv) {
+    const value = Number(uv) || 0;
+    if (value <= 2) return "Low exposure";
+    if (value <= 5) return "Moderate exposure";
+    if (value <= 7) return "High exposure";
+    if (value <= 10) return "Very high exposure";
+    return "Extreme exposure";
   }
 
-  function uvDescriptor(uv) {
-    const n = Number(uv) || 0;
-    if (n <= 2) return "Low · no protection needed";
-    if (n <= 5) return "Moderate · wear sunscreen";
-    if (n <= 7) return "High · seek shade at midday";
-    if (n <= 10) return "Very high · stay shaded";
-    return "Extreme · avoid the midday sun";
+  function humidityDescriptor(humidity) {
+    const value = Number(humidity);
+    if (value < 30) return "Dry air";
+    if (value <= 60) return "Comfortable";
+    if (value <= 75) return "A little humid";
+    return "Very humid";
+  }
+
+  function renderVibe(weather) {
+    const mood = deriveMood(weather);
+
+    setText(els.vibeEmoji, mood.emoji);
+    setText(els.vibeTitle, mood.title);
+    setText(els.vibeText, mood.text);
+    els.vibeCard.dataset.mood = mood.key;
+    els.vibeCard.dataset.emoji = mood.emoji;
+
+    setText(
+      els.vibeReason,
+      `${weather.condition} · ${numberText(weather.tempC)}°C · ${numberText(weather.windKph, 1)} km/h wind`
+    );
+
+    return mood;
   }
 
   function renderCurrent(weather) {
     setText(els.cityName, weather.city || "—");
     const region = [weather.region, weather.country].filter(Boolean).join(", ");
     setText(els.region, region || "—");
-    setText(els.tempC, round(weather.tempC));
+    setText(els.tempC, numberText(weather.tempC));
     setText(els.condText, weather.condition || "—");
-    setText(els.hiLo, `H ${round(weather.today.maxC)}° · L ${round(weather.today.minC)}°`);
     setIcon(els.condIcon, weather.conditionIcon, `${weather.condition || "Current"} weather icon`);
 
     setText(
@@ -631,156 +545,47 @@
       `Updated ${clockLabel(weather.lastUpdatedEpoch, weather.tz)} local · ${relativeAgo(weather.lastUpdatedEpoch)}`
     );
 
-    els.hourlyCity.textContent = weather.city || "the city";
-    updateClock();
+    setText(els.humidity, `${numberText(weather.humidity)}%`);
+    setText(els.humiditySub, humidityDescriptor(weather.humidity));
 
-    setText(els.feelsLike, `${round(weather.feelsC)}°`);
-    setText(els.feelsLikeSub, `Actual ${decimal(weather.tempC)}°C`);
+    setText(els.wind, `${numberText(weather.windKph, 1)} km/h`);
+    const windDetail = [weather.windDir, weather.gustKph !== null ? `gusts ${numberText(weather.gustKph, 1)} km/h` : ""]
+      .filter(Boolean)
+      .join(" · ");
+    setText(els.windSub, windDetail || "Calm");
 
-    setText(els.humidity, `${round(weather.humidity)}%`);
-    setText(els.humiditySub, Number.isFinite(Number(weather.dewpointC)) ? `Dew point ${decimal(weather.dewpointC)}°C` : "Relative humidity");
-
-    setText(els.wind, `${decimal(weather.windKph)} km/h`);
-    setText(els.windSub, `${weather.windDir || ""}${weather.gustKph ? ` · gusts ${round(weather.gustKph)} km/h` : ""}`.trim() || "Calm");
-
-    setText(els.uv, decimal(weather.uv));
+    setText(els.uv, numberText(weather.uv, 1));
     setText(els.uvSub, uvDescriptor(weather.uv));
 
-    setText(els.cloud, `${round(weather.cloud)}%`);
-    setText(els.visibility, `${decimal(weather.visKm)} km`);
-    setText(els.pressure, `${round(weather.pressureMb)} hPa`);
-    setText(els.windDetail, `${decimal(weather.windKph)} km/h ${weather.windDir || ""}`.trim());
-    setText(els.tempF, `${decimal(weather.tempF)}°F`);
-    setText(els.updated, `${clockLabel(weather.lastUpdatedEpoch, weather.tz)} local`);
-  }
-
-  function renderHourly(weather) {
-    const track = els.hourlyTrack;
-    track.textContent = "";
-    const frag = document.createDocumentFragment();
-    const nowKey = String(weather.localtime || "").slice(0, 13);
-
-    weather.hours.forEach((hour) => {
-      const isNow = String(hour.time || "").slice(0, 13) === nowKey;
-      const item = create("div", `hour${isNow ? " is-now" : ""}`);
-      item.setAttribute("role", "listitem");
-
-      const label = hourLabelFromApi(hour.time, isNow);
-      const chance = round(hour.chance_of_rain);
-      const condition = hour.condition ? hour.condition.text : "Weather";
-      const temp = round(hour.temp_c);
-
-      item.setAttribute(
-        "aria-label",
-        `${label}: ${condition}, ${temp} degrees Celsius, ${chance}% chance of rain`
-      );
-
-      item.appendChild(create("span", "hour__time", label));
-
-      const img = create("img", "hour__icon");
-      img.width = 40;
-      img.height = 40;
-      img.loading = "lazy";
-      img.decoding = "async";
-      setIcon(img, hour.condition ? hour.condition.icon : "", `${condition} icon`);
-      item.appendChild(img);
-
-      item.appendChild(create("span", "hour__temp", `${temp}°`));
-
-      const rain = create("span", "hour__rain");
-      rain.innerHTML =
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3.5S6 10.4 6 14.3a6 6 0 0 0 12 0c0-3.9-6-10.8-6-10.8Z"/></svg>';
-      rain.appendChild(document.createTextNode(`${chance}%`));
-      item.appendChild(rain);
-
-      frag.appendChild(item);
-    });
-
-    track.appendChild(frag);
-  }
-
-  function renderOutlook(weather) {
-    const grid = els.outlookGrid;
-    grid.textContent = "";
-    const count = weather.days.length;
-
-    setText(els.outlookTitle, count === 1 ? "1-Day Outlook" : `${count}-Day Outlook`);
+    setText(els.cloud, `${numberText(weather.cloud)}%`);
+    setText(els.visibility, `${numberText(weather.visKm, 1)} km`);
+    setText(els.pressure, `${numberText(weather.pressureMb)} hPa`);
     setText(
-      els.outlookSub,
-      count >= 5
-        ? "Daily highs, lows and rain chance"
-        : `Daily highs, lows and rain chance · ${count} days available from WeatherAPI`
+      els.windDetail,
+      [numberText(weather.windKph, 1) + " km/h", weather.windDir].filter(Boolean).join(" ")
     );
+    setText(els.tempF, `${numberText(weather.tempF, 1)}°F`);
+    setText(els.updated, `${clockLabel(weather.lastUpdatedEpoch, weather.tz)} local`);
 
-    const frag = document.createDocumentFragment();
-    weather.days.forEach((day, index) => {
-      const card = create("article", "day");
-      const date = day.date;
-      const condition = day.day && day.day.condition ? day.day.condition.text : "—";
-      const icon = day.day && day.day.condition ? day.day.condition.icon : "";
-      const max = round(day.day ? day.day.maxtemp_c : NaN);
-      const min = round(day.day ? day.day.mintemp_c : NaN);
-      const chance = Math.min(100, Math.max(0, round(day.day ? day.day.daily_chance_of_rain : 0)));
-
-      const head = create("div", "day__head");
-      const headCopy = create("div");
-      headCopy.appendChild(create("h4", "day__name", weekdayLabel(date, index)));
-      headCopy.appendChild(create("p", "day__date", dateLabel(date)));
-      head.appendChild(headCopy);
-
-      const img = create("img", "day__icon");
-      img.width = 40;
-      img.height = 40;
-      img.loading = "lazy";
-      img.decoding = "async";
-      setIcon(img, icon, `${condition} icon`);
-      head.appendChild(img);
-      card.appendChild(head);
-
-      card.appendChild(create("p", "day__condition", condition));
-
-      const temps = create("div", "day__temps");
-      temps.appendChild(create("span", "day__max", `${max}°`));
-      temps.appendChild(create("span", "day__min", `${min}°`));
-      card.appendChild(temps);
-
-      const rain = create("div", "day__rain");
-      rain.innerHTML =
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3.5S6 10.4 6 14.3a6 6 0 0 0 12 0c0-3.9-6-10.8-6-10.8Z"/></svg>';
-      rain.appendChild(create("span", "", `${chance}%`));
-      const bar = create("span", "rain-bar");
-      const fill = create("i");
-      fill.style.width = `${chance}%`;
-      bar.appendChild(fill);
-      rain.appendChild(bar);
-      card.appendChild(rain);
-
-      card.setAttribute(
-        "aria-label",
-        `${weekdayLabel(date, index)}, ${dateLabel(date)}: ${condition}, high ${max} degrees, low ${min} degrees, ${chance}% chance of rain`
-      );
-      frag.appendChild(card);
-    });
-
-    grid.appendChild(frag);
+    updateClock();
   }
 
   function renderJsonPanel() {
     const { formatted, raw, tab } = state.json;
     const content = tab === "raw" ? raw : formatted;
+
     els.jsonCode.textContent = content || "";
-    setText(
-      els.jsonMeta,
-      state.weather
-        ? `${state.weather.city} · ${decimal(new Blob([raw || ""]).size / 1024)} KB · fetched ${clockLabel(
-            Math.floor(new Date(state.weather.fetchedAt).getTime() / 1000),
-            state.weather.tz
-          )} local`
-        : "Formatted and raw WeatherAPI data"
-    );
     els.copyJsonBtn.disabled = !content;
     els.jsonPre.setAttribute("aria-label", `${tab === "raw" ? "Raw" : "Formatted"} JSON response`);
     updateTabs();
+
+    if (state.weather) {
+      const sizeKb = new Blob([raw || ""]).size / 1024;
+      setText(
+        els.jsonMeta,
+        `${state.weather.city} · ${numberText(sizeKb, 1)} KB · WeatherAPI /v1/current.json`
+      );
+    }
   }
 
   function updateTabs() {
@@ -792,39 +597,32 @@
       tab.tabIndex = selected ? 0 : -1;
     });
     els.jsonPanel.setAttribute("aria-labelledby", isFormatted ? "tabFormatted" : "tabRaw");
-    els.copyJsonBtn.setAttribute("aria-label", `Copy ${isFormatted ? "formatted" : "raw"} JSON to clipboard`);
+    els.copyJsonBtn.setAttribute(
+      "aria-label",
+      `Copy ${isFormatted ? "formatted" : "raw"} JSON to clipboard`
+    );
   }
 
   function renderWeather(weather, payload, rawText) {
     state.weather = weather;
-    state.requestedQuery = weather.requestedQuery || state.requestedQuery;
 
+    const mood = renderVibe(weather);
     renderCurrent(weather);
-    renderVibe();
-    renderHourly(weather);
-    renderOutlook(weather);
 
     state.json.formatted = JSON.stringify(payload, null, 2);
     state.json.raw = rawText;
     renderJsonPanel();
 
-    applyTheme(state.previewMood === "auto" ? deriveVibe(weather).key : state.previewMood);
+    applyTheme(mood.key);
 
     els.skeleton.hidden = true;
     els.fatal.hidden = true;
     els.content.hidden = false;
-    els.content.classList.remove("is-updating");
-    els.content.classList.remove("just-updated");
+    els.content.classList.remove("is-updating", "just-updated");
     void els.content.offsetWidth;
     els.content.classList.add("just-updated");
 
-    els.hourlyTrack.scrollLeft = 0;
-    els.copyVibeBtn.classList.remove("is-copied");
-    els.copyJsonBtn.textContent = "";
-    els.copyJsonBtn.innerHTML =
-      '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M15 5.5A2.5 2.5 0 0 0 12.5 3H6.5A2.5 2.5 0 0 0 4 5.5v6A2.5 2.5 0 0 0 6.5 14"/></svg>Copy';
-
-    document.title = `${weather.city} ${round(weather.tempC)}° · SkyMood`;
+    document.title = `${weather.city} ${numberText(weather.tempC)}° · SkyMood`;
     syncChips(state.requestedQuery, weather.city);
     updateClock();
     startClock();
@@ -833,6 +631,7 @@
   function syncChips(requestedQuery, resolvedCity) {
     const requested = normalizeName(requestedQuery);
     const resolved = normalizeName(resolvedCity);
+
     Array.from(els.chips.querySelectorAll(".chip")).forEach((chip) => {
       const name = normalizeName(chip.dataset.city);
       chip.setAttribute("aria-pressed", String(name === requested || name === resolved));
@@ -888,13 +687,13 @@
     els.input.focus({ preventScroll: true });
   }
 
-  function errorCopy(code, query) {
+  function errorCopy(code) {
     return ERROR_COPY[code] || ERROR_COPY.UNEXPECTED;
   }
 
-  function showError(err, query) {
-    const code = err && err.code ? err.code : "UNEXPECTED";
-    const copy = errorCopy(code, query);
+  function showError(error, query) {
+    const code = error && error.code ? error.code : "UNEXPECTED";
+    const copy = errorCopy(code);
     const message = copy.message(query);
     state.lastFailedQuery = query;
 
@@ -913,7 +712,10 @@
     hideBanner();
     setText(els.alertTitle, copy.title);
     setText(els.alertText, message);
-    setText(els.alertNote, `Still showing the last successful update for ${state.weather.city}.`);
+    setText(
+      els.alertNote,
+      `Still showing the last successful update for ${state.weather.city}.`
+    );
     els.alertNote.hidden = false;
     els.retryBtn.hidden = !copy.retryable;
     els.banner.hidden = false;
@@ -921,6 +723,17 @@
   }
 
   /* ----------------------------- Network ----------------------------- */
+
+  function errorCodeForResponse(payload, status) {
+    const serverCode = payload && payload.error && payload.error.code;
+    if (typeof serverCode === "string" && ERROR_COPY[serverCode]) return serverCode;
+
+    if (status === 404) return "CITY_NOT_FOUND";
+    if (status === 429) return "RATE_LIMITED";
+    if (status === 401 || status === 403) return "INVALID_API_KEY";
+    if (status >= 500) return "SERVICE_UNAVAILABLE";
+    return "UNEXPECTED";
+  }
 
   async function requestWeather(query, outerSignal) {
     const controller = new AbortController();
@@ -954,46 +767,31 @@
       }
 
       if (!response.ok) {
-        const code =
-          (payload && payload.error && payload.error.code) ||
-          (response.status === 404
-            ? "CITY_NOT_FOUND"
-            : response.status === 429
-              ? "RATE_LIMITED"
-              : response.status === 401 || response.status === 403
-                ? "INVALID_API_KEY"
-                : response.status >= 500
-                  ? "SERVICE_UNAVAILABLE"
-                  : "UNEXPECTED");
-        throw new AppError(code, (payload && payload.error && payload.error.message) || response.statusText);
+        throw new AppError(
+          errorCodeForResponse(payload, response.status),
+          (payload && payload.error && payload.error.message) || response.statusText
+        );
       }
 
       if (!payload) {
         throw new AppError("BAD_RESPONSE", "Response was not JSON");
       }
 
-      if (payload.ok === false) {
-        throw new AppError(
-          payload.error && payload.error.code ? payload.error.code : "UNEXPECTED",
-          (payload.error && payload.error.message) || "Request failed"
-        );
-      }
-
-      if (payload.ok !== true) {
-        throw new AppError("BAD_RESPONSE", "Unexpected payload");
+      if (payload.error) {
+        throw new AppError(errorCodeForResponse(payload, response.status), payload.error.message);
       }
 
       return { payload, rawText };
-    } catch (err) {
+    } catch (error) {
       if (timedOut) throw new AppError("TIMEOUT", "Request timed out");
-      if (err instanceof AppError) throw err;
+      if (error instanceof AppError) throw error;
       if (outerSignal && outerSignal.aborted) {
-        const abort = new Error("Aborted");
-        abort.name = "AbortError";
-        throw abort;
+        const aborted = new Error("Aborted");
+        aborted.name = "AbortError";
+        throw aborted;
       }
-      if (err && err.name === "AbortError") throw err;
-      throw new AppError("NETWORK", err && err.message ? err.message : "Network request failed");
+      if (error && error.name === "AbortError") throw error;
+      throw new AppError("NETWORK", error && error.message ? error.message : "Network request failed");
     } finally {
       window.clearTimeout(timer);
       if (outerSignal) outerSignal.removeEventListener("abort", forwardAbort);
@@ -1016,7 +814,7 @@
     hideBanner();
 
     const apiQuery = resolveApiQuery(query);
-    const seq = ++state.requestSeq;
+    const sequence = ++state.requestSeq;
     if (state.controller) state.controller.abort();
     state.controller = new AbortController();
 
@@ -1024,107 +822,46 @@
 
     try {
       const { payload, rawText } = await requestWeather(apiQuery, state.controller.signal);
-      if (seq !== state.requestSeq) return;
+      if (sequence !== state.requestSeq) return;
 
       const weather = normalizeWeather(payload);
-      weather.requestedQuery = query;
-      renderWeather(weather, payload, rawText);
+      state.requestedQuery = query;
       state.lastFailedQuery = null;
+      renderWeather(weather, payload, rawText);
       setLoading(false);
-      announce(`Weather updated for ${weather.city}: ${round(weather.tempC)} degrees Celsius, ${weather.condition}.`);
-    } catch (err) {
-      if ((err && err.name === "AbortError") || seq !== state.requestSeq) return;
-      if (err && err.code) {
-        console.warn(`[SkyMood] ${err.code}: ${err.message}`);
+      announce(
+        `Weather updated for ${weather.city}: ${numberText(weather.tempC)} degrees Celsius, ${weather.condition}.`
+      );
+    } catch (error) {
+      if ((error && error.name === "AbortError") || sequence !== state.requestSeq) return;
+      if (error && error.code) {
+        console.warn(`[SkyMood] ${error.code}: ${error.message}`);
       }
       setLoading(false);
-      showError(err, query);
+      showError(error, query);
     }
   }
 
-  /* ----------------------------- Chips & preview controls ----------------------------- */
+  /* ----------------------------- Chips / JSON / events ----------------------------- */
 
   function buildChips() {
-    const frag = document.createDocumentFragment();
+    const fragment = document.createDocumentFragment();
+
     CONFIG.POPULAR_CITIES.forEach((city) => {
       const chip = create("button", "chip", city);
       chip.type = "button";
       chip.dataset.city = city;
       chip.setAttribute("aria-pressed", "false");
       chip.addEventListener("click", () => {
-        els.input.value = city;
         clearFieldError();
+        els.input.value = city;
         loadCity(city);
       });
-      frag.appendChild(chip);
-    });
-    els.chips.appendChild(frag);
-  }
-
-  function buildMoodOptions() {
-    const options = [
-      { key: "auto", emoji: "✨", label: "Auto · live weather", auto: true },
-      ...Object.values(MOODS).map((mood) => ({
-        key: mood.key,
-        emoji: mood.emoji,
-        label: mood.short,
-        title: mood.label,
-      })),
-    ];
-
-    const frag = document.createDocumentFragment();
-    options.forEach((option) => {
-      const button = create("button", `mood-option${option.auto ? " mood-panel__auto" : ""}`);
-      button.type = "button";
-      button.dataset.mood = option.key;
-      button.setAttribute("aria-pressed", String(option.key === "auto"));
-      if (option.title) button.title = option.title;
-      button.appendChild(create("span", "mood-option__emoji", option.emoji));
-      button.appendChild(create("span", "", option.label));
-      button.addEventListener("click", () => setPreviewMood(option.key));
-      frag.appendChild(button);
+      fragment.appendChild(chip);
     });
 
-    els.moodOptions.appendChild(frag);
+    els.chips.appendChild(fragment);
   }
-
-  function updateMoodControls() {
-    Array.from(els.moodOptions.querySelectorAll(".mood-option")).forEach((button) => {
-      const active = button.dataset.mood === state.previewMood;
-      button.classList.toggle("is-active", active);
-      button.setAttribute("aria-pressed", String(active));
-    });
-  }
-
-  function setPreviewMood(key) {
-    if (key !== "auto" && !MOODS[key]) return;
-    state.previewMood = key;
-    updateMoodControls();
-
-    if (state.weather) {
-      applyTheme(key === "auto" ? deriveVibe(state.weather).key : key);
-      renderVibe();
-      announce(
-        key === "auto"
-          ? "Live weather mood restored."
-          : `${MOODS[key].title} preview applied. ${MOODS[key].text}`
-      );
-    } else {
-      applyTheme(key === "auto" ? "clear" : key);
-      announce(key === "auto" ? "Live weather mood restored." : `${MOODS[key].title} preview applied.`);
-    }
-  }
-
-  function openMoodPanel(open) {
-    els.moodPanel.hidden = !open;
-    els.moodBtn.setAttribute("aria-expanded", String(open));
-    if (open) {
-      const first = els.moodOptions.querySelector(".mood-option");
-      if (first) first.focus({ preventScroll: true });
-    }
-  }
-
-  /* ----------------------------- JSON viewer ----------------------------- */
 
   function setJsonOpen(open) {
     els.jsonPanel.hidden = !open;
@@ -1139,8 +876,6 @@
     state.json.tab = tab === "raw" ? "raw" : "formatted";
     renderJsonPanel();
   }
-
-  /* ----------------------------- Events ----------------------------- */
 
   function bindEvents() {
     els.form.addEventListener("submit", (event) => {
@@ -1159,44 +894,12 @@
     });
 
     els.retryBtn.addEventListener("click", () => {
-      const query = state.lastFailedQuery || state.requestedQuery || CONFIG.DEFAULT_CITY;
+      const query = state.lastFailedQuery || els.input.value.trim() || state.requestedQuery;
       els.input.value = query;
       loadCity(query);
     });
 
     els.dismissAlertBtn.addEventListener("click", hideBanner);
-
-    els.moodBtn.addEventListener("click", () => {
-      openMoodPanel(els.moodPanel.hidden);
-    });
-
-    document.addEventListener("click", (event) => {
-      if (els.moodPanel.hidden) return;
-      if (!event.target.closest(".mood-preview")) openMoodPanel(false);
-    });
-
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !els.moodPanel.hidden) {
-        openMoodPanel(false);
-        els.moodBtn.focus({ preventScroll: true });
-      }
-    });
-
-    els.copyVibeBtn.addEventListener("click", async () => {
-      const vibe = activeVibe();
-      if (!vibe) return;
-      const copied = await copyText(`${vibe.title}: ${vibe.text}`);
-      if (copied) {
-        els.copyVibeBtn.classList.add("is-copied");
-        showToast("Vibe copied to clipboard");
-        window.clearTimeout(state.copyTimer);
-        state.copyTimer = window.setTimeout(() => {
-          els.copyVibeBtn.classList.remove("is-copied");
-        }, 1800);
-      } else {
-        showToast("Couldn't copy — your browser blocked clipboard access.");
-      }
-    });
 
     els.copyJsonBtn.addEventListener("click", async () => {
       const content = state.json.tab === "raw" ? state.json.raw : state.json.formatted;
@@ -1221,7 +924,8 @@
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
         const next = tab === els.tabFormatted ? "raw" : "formatted";
-        const target = event.key === "Home" ? "formatted" : event.key === "End" ? "raw" : next;
+        const target =
+          event.key === "Home" ? "formatted" : event.key === "End" ? "raw" : next;
         switchTab(target);
         (target === "raw" ? els.tabRaw : els.tabFormatted).focus();
       });
@@ -1248,12 +952,10 @@
     state.initialized = true;
 
     buildChips();
-    buildMoodOptions();
-    updateMoodControls();
     bindEvents();
+    applyTheme("clear");
 
     els.tempC.textContent = "—";
-    setLoading(true, CONFIG.DEFAULT_CITY);
     loadCity(CONFIG.DEFAULT_CITY);
   }
 

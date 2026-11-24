@@ -2,234 +2,198 @@
 
 **Know the sky, plan your day.**
 
-SkyMood is a lifestyle weather app: live current conditions, a plain-English “vibe” for the day, hourly and multi-day outlooks, and a developer JSON viewer. Weather data comes from [WeatherAPI.com](https://www.weatherapi.com/), and the API key stays on the server.
+SkyMood is a small, single-page weather app that shows the **current conditions** for a city, turns them into one of five playful “vibes”, and exposes the untouched WeatherAPI response in a formatted/raw JSON viewer.
 
-**Live app:** _added after deployment_
+- **Live app:** <https://skymood-eight.vercel.app>
+- **Source:** <https://github.com/deepika-47/SkyMood>
+- **Data:** [WeatherAPI.com](https://www.weatherapi.com/) `/v1/current.json`
 
----
-
-## What's inside
-
-- **Search any city** with Enter or the Search button, plus quick city presets.
-- **Expressive recommendations** that translate weather into one of six moods, with the exact copy from the brief.
-- **Six full-screen gradients** that cross-fade over 0.6s when the city or mood changes.
-- **Hero weather card** with local time, condition, Celsius temperature, feels-like, daily high/low and last-updated time.
-- **Metrics + details**: humidity, wind, UV index, feels-like, cloud cover, visibility, pressure, wind detail, Fahrenheit and update time.
-- **24-hour forecast strip** (horizontally scrollable).
-- **Outlook cards** with daily high/low, condition and rain chance.
-- **Mood preview** popover to preview all six backgrounds/copies without changing the live data, plus one-click copy of the vibe.
-- **API response viewer** with formatted/raw tabs, copy and scrolling.
-- **Loading, empty, error and outage states**, retry actions, and protection against stale responses.
-
-The visual system uses frosted-glass cards (`rgba(255,255,255,.18)`, `blur(12px)`, `rgba(255,255,255,.3)` borders, 20px radii), Plus Jakarta Sans for display text and Inter for numerals/data.
+No forecasts, login, profiles, history, database or notifications. The weather API key stays on the server.
 
 ---
 
-## Architecture
+## What it does
+
+- Loads **Mumbai** automatically and fetches live weather immediately.
+- Searches by **button or Enter**, accepts repeated searches, blocks empty input and keeps the typed city in the field.
+- Offers the ten preset cities: **Mumbai, Delhi, Bengaluru, Hyderabad, Chennai, Kolkata, Pune, Ahmedabad, New York, London**.
+- Shows temperature in **°C**, condition icon and text, **city-local time**, last-updated time, **°F**, humidity, wind, UV index, cloud cover, visibility and pressure.
+- Gives exactly **three primary metric cards**: Humidity, Wind and UV index.
+- Generates one of five moods: **Freeze Frame, Perfect Day, Sun Alert, Rain Check, Breezy Mode**.
+- Opens a **formatted/raw JSON** viewer with tab switching, copy, keyboard support and scrolling; it refreshes after every successful request.
+- Handles loading, invalid input, invalid cities, invalid keys, rate limits, network failures, server errors, timeouts, malformed/partial payloads and stale responses.
+- Keeps the last valid weather on screen when a later request fails.
+
+---
+
+## Project structure
 
 ```
-index.html              App shell, static UI, accessible landmarks
-css/styles.css          Design tokens, sky gradients, glass UI, responsive layouts
-js/app.js               State, API client, mood engine, rendering, JSON viewer, errors
-api/weather.js          Vercel Node function — WeatherAPI proxy, key stays server-side
-tools/dev_server.py     Local static server + same proxy (Python stdlib only)
-.env.example            Local environment template (real .env is git-ignored)
-package.json            Project metadata + `npm run dev` convenience script
+index.html              Page shell and accessible UI
+css/styles.css          Design tokens, sky gradients, glass UI, responsive layout
+js/app.js               Search/state, API client, mood engine, rendering, JSON viewer, errors
+api/weather.js          Vercel Node function — WeatherAPI proxy; key stays server-side
+tools/dev_server.py     Local static server + the same proxy (Python standard library)
+.env.example            Local environment template
+.vercelignore           Keeps .env and developer-only files out of the static deployment
+robots.txt              Search-engine directives
 ```
 
-There is no build step and no frontend framework. The only server code is a single read-only proxy function.
+There is no build step and no frontend framework.
 
-### Why a proxy?
+### Data flow
 
-The brief noted that frontend API keys are not secret. Instead of shipping the key in `app.js`, SkyMood calls its own `/api/weather?q=…` endpoint. The function adds `WEATHER_API_KEY` from the environment, requests `current.json` and `forecast.json?days=5` in parallel, validates the city, maps upstream errors, and returns:
+The browser calls `/api/weather?q=…`; it never receives `WEATHER_API_KEY`. The proxy:
 
-```json
-{
-  "ok": true,
-  "requestedQuery": "Mumbai, India",
-  "provider": "WeatherAPI.com",
-  "fetchedAt": "…",
-  "endpoints": ["/v1/current.json", "/v1/forecast.json?days=5"],
-  "data": { "current": { … }, "forecast": { … } }
-}
-```
+1. Accepts only `GET` and a 1–80 character city query.
+2. Calls WeatherAPI **`/v1/current.json`** only.
+3. Validates that `location` and `current` are complete.
+4. Returns the **raw WeatherAPI body** untouched on success, so the JSON viewer shows the real provider payload.
+5. Maps provider failures to small `{ ok: false, error: { code, message } }` responses.
 
-The upstream bodies are passed through untouched under `data.current` and `data.forecast`, so the JSON viewer shows the real provider payload. No key is sent to the browser (verified in a live response).
+`tools/dev_server.py` mirrors this behaviour for local development. It reads `.env` (which is git-ignored), serves only known static asset types, blocks dotfiles, and returns the same error codes.
 
-### Mood engine
+### Mood rules
 
-Priority order, applied top-down:
+Priority is applied top-down; the first match wins.
 
-| Priority | Mood | Condition | Copy |
-| --- | --- | --- | --- |
-| 1 | Rain Check ☔ | condition text matches rain, drizzle, shower, thunder, storm or sleet | “Step out with an umbrella—don't get soaked!” |
-| 2 | Freeze Frame ❄️ | snow/ice/freezing, **or** temp < 15°C | “Bone-chilling cold outside—cuddle up tight!” |
-| 3 | Starry Night 🌙 | night (`is_day = 0`) with clear/sunny conditions | “Starry skies ahead—sleep tight!” |
-| 4 | Sun Alert ☀️ | temp > 32°C **or** UV index > 7 | “Don't get eaten by the sun today—stay shaded and hydrated!” |
-| 5 | Breezy Mode 🌀 | wind ≥ 20 km/h and 18–25°C | “A cool breeze that touches your soul—step outside and enjoy!” |
-| 6 | Perfect Day 🌤️ | clear/sunny/partly cloudy and 22–31°C | “Clear skies ahead—plan a day out with your loved ones!” |
-| fallback | Easy Going ✨ | anything else (e.g. mild haze) | “Mild and steady—a good day to head outside!” |
+| Priority | Mood | Condition |
+| --- | --- | --- |
+| 1 | **Freeze Frame** ❄️ | Condition contains snow, blizzard, sleet, freezing or ice |
+| 2 | **Rain Check** ☔ | Condition contains rain, drizzle, shower, thunder or storm |
+| 3 | **Freeze Frame** ❄️ | Temperature **below 15°C** |
+| 4 | **Sun Alert** ☀️ | Temperature **above 32°C** |
+| 5 | **Breezy Mode** 🌀 | Wind **at least 20 km/h** |
+| 6 | **Perfect Day** 🌤️ | Everything else (fallback) |
 
-The fallback avoids claiming “clear skies” when it is hazy or overcast. Thresholds live in `THRESHOLDS` in `js/app.js` and are easy to tune.
+Exact vibe copy:
 
-The six gradients are exactly the requested values and are switched by cross-fading two fixed layers (gradients themselves are not animatable).
+- **Freeze Frame:** “Bone-chilling cold ahead, cuddle up tight😉”
+- **Perfect Day:** “The weather looks great! Time to plan a day out with your loved ones🫂”
+- **Sun Alert:** “Don't get eaten by the sun today! Stay hydrated and slap on some SPF🌞”
+- **Rain Check:** “Step out with an umbrella — don't get soaked☔”
+- **Breezy Mode:** “A cool breeze that touches your soul — step outside🌀”
 
-### City query qualification
+### Error and state model
 
-WeatherAPI resolves the bare string `Delhi` to Delhi, Ontario (Canada). Preset city searches are therefore qualified (`Delhi, India`, `London, United Kingdom`, `New York, United States`, …) so clicking a preset always shows the expected city. Typed searches that include a country/region are passed through unchanged.
+- **First load:** skeleton with a spinner, `aria-busy` on the search area, then content or a fatal error card.
+- **Later load:** the existing card is dimmed under a loading chip; it stays visible if the request fails.
+- **Non-fatal failure:** a dismissible alert names the problem and, where useful, offers **Retry**; the previous city is explicitly labelled as the last successful update.
+- **Fatal failure (no data yet):** a focused error card replaces the skeleton.
+- **Stale responses:** each request gets a sequence number and an `AbortController`; an older response cannot overwrite a newer one.
+- **Unexpected payloads:** incomplete or non-JSON 200 responses are rejected before rendering, so the card is never partially updated.
 
 ---
 
 ## Run locally
 
-Requirements: Python 3.9+ (no Node.js needed for the local server).
+Requirements: Python 3.9+ and a WeatherAPI key.
 
 ```bash
-# 1. Add your key
+# 1. Configure the key
 cp .env.example .env
-# edit .env → WEATHER_API_KEY=your_key
+# edit .env: WEATHER_API_KEY=your_key
 
-# 2. Serve the app and proxy
+# 2. Start the local app and proxy
 python tools/dev_server.py
-# → http://127.0.0.1:4173
+# -> http://127.0.0.1:4173
 
-# optional: different port
+# optional port
 python tools/dev_server.py 5000
 ```
 
-`tools/dev_server.py` serves only static asset types, blocks dotfiles (including `.env`), and exposes the same `/api/weather` shape as the Vercel function. It caches per city for 45 seconds.
+The server has no third-party Python dependencies.
 
-With Node/Vercel CLI installed you can also use `vercel dev`, as long as `WEATHER_API_KEY` is present in the environment.
+---
 
 ## Deploy on Vercel
 
-1. Import the GitHub repository into Vercel (or deploy with the CLI).
-2. Add an environment variable **`WEATHER_API_KEY`** for Production, Preview and Development.
-3. Deploy. Framework preset: **Other**; no build command; output is the repository root.
-4. `api/weather.js` is picked up automatically as a Node serverless function.
+The production project is `deepika20507-4965/skymood`.
 
-The key is never exposed to the client. Rotate it in the WeatherAPI dashboard and update the Vercel env var if needed.
+1. Set `WEATHER_API_KEY` in **Project → Settings → Environment Variables** for Production, Preview and Development.
+2. Link and deploy from the repository root:
 
----
+   ```bash
+   npx vercel link --project skymood
+   npx vercel deploy --prod
+   ```
 
-## Requirement-wise implementation & test checklist
+`.vercelignore` excludes `.env*`, `.vercel`, `tools/`, `README.md` and `package.json` from the static upload. The API function is picked up from `api/weather.js`; framework preset **Other**, no build command.
 
-Tested on **23 Nov 2026** in Chromium against the local app (1440×1100, 1000×800, 768×1150 and 390×844 viewports) with live WeatherAPI calls. Lighthouse (with the JSON viewer open): **Accessibility 100, Best Practices 100, SEO 100**.
-
-### FR-01 — Application initialization
-
-| ID | Status | Evidence |
-| --- | --- | --- |
-| FR-01.1 Default city Mumbai | ✅ Passed | Input prefilled with Mumbai; hero renders Mumbai. |
-| FR-01.2 Initial API call | ✅ Passed | `/api/weather?q=Mumbai%2C%20India` fired on load; response 200. |
-| FR-01.3 Initial loading | ✅ Passed | Skeleton card + spinner + “Fetching Mumbai's sky…” shown immediately; `aria-busy` set. |
-| FR-01.4 Successful response | ✅ Passed | Hero, vibe, metrics, details, hourly (24), outlook (3) and JSON populated. |
-| FR-01.5 Failed response | ✅ Passed | With an invalid-key server, a dedicated “API configuration error” fatal state rendered instead of a blank card. |
-
-Acceptance: automatic Mumbai request ✅ · input shows Mumbai ✅ · values come from the API ✅ · no hardcoded weather values (all initial DOM values are “—”, filled at runtime) ✅.
-
-### FR-02 — City search
-
-| ID | Status | Evidence |
-| --- | --- | --- |
-| FR-02.1 Search input | ✅ Passed | Text entry works. |
-| FR-02.2 Search button | ✅ Passed | Mouse click submits. |
-| FR-02.3 Enter key | ✅ Passed | Enter in the input submits the form. |
-| FR-02.4 Empty validation | ✅ Passed | Inline error shown, focus kept, **zero** extra API requests. |
-| FR-02.5 API request | ✅ Passed | Verified for Delhi, Bengaluru, London, Tokyo, Sydney, Dubai, Paris. |
-| FR-02.6 Result update | ✅ Passed | All sections re-render from the new payload. |
-| FR-02.7 Search failure | ✅ Passed | “City not found” banner; previous data marked as the last successful update. |
-
-Acceptance: Delhi/London fetch correctly ✅ · input retains the searched city (typed or chip) ✅ · old data is dimmed/overlaid during loading and explicitly labelled on error ✅ · multiple searches without refresh ✅.
-
-### FR-03 — Popular cities
-
-| ID | Status | Evidence |
-| --- | --- | --- |
-| FR-03.1 Chips | ✅ Passed | Mumbai, Delhi, Bengaluru, Hyderabad, Chennai, Kolkata, Pune, Ahmedabad, New York, London (plus Tokyo from the second brief) rendered as chips. |
-| FR-03.2 Click fetches | ✅ Passed | Bengaluru chip loaded Karnataka weather. |
-| FR-03.3 Search input sync | ✅ Passed | Input updated to the clicked city. |
-| FR-03.4 Selected highlight | ✅ Passed | `aria-pressed="true"` + solid white selected style; previous chip clears. |
-| FR-03.5 Weather update | ✅ Passed | Hero, vibe, metrics, hourly, outlook and JSON all changed. |
-
-### FR-04 — Current weather
-
-✅ Passed. Every value is populated from the response: temperature in °C (hero + metric + outlook), wind in km/h, API condition icon/alt text, and local time via the returned `tz_id`. Verified against Mumbai’s live payload: 28°C, 54% humidity, 6.5 km/h NNE, UV 0, 32% cloud, 10 km visibility, 1016 hPa, 81.7°F, “Smoky haze”, last updated 10:15 PM local.
-
-### FR-05 — Weather interpretation
-
-✅ Passed. All six titles/copies match the brief exactly (verified by clicking every mood preview option and reading the rendered text and computed gradient). Live mood changes on search (e.g. rainy Bengaluru → Rain Check). Thresholds and priority order are documented above. The fallback “Easy Going” is the only added copy, used for conditions outside the six scenarios (e.g. mild haze).
-
-### FR-06 — Additional metrics
-
-✅ Passed. Primary cards: feels like, humidity (%), wind (km/h), UV index with a descriptor. Secondary: cloud cover, visibility, pressure, wind direction/gusts, Fahrenheit temperature, last updated. All update on every successful city change.
-
-### FR-07 — API response viewer
-
-| ID | Status | Evidence |
-| --- | --- | --- |
-| FR-07.1 Formatted JSON | ✅ Passed | Indented `JSON.stringify(payload, null, 2)`. |
-| FR-07.2 Raw JSON | ✅ Passed | Original response text preserved (single-line server JSON). |
-| FR-07.3 Tab switching | ✅ Passed | Click + ArrowLeft/ArrowRight/Home/End; `aria-selected`/`tabpanel` updated. |
-| FR-07.4 Copy | ✅ Passed | Copy captures the active representation; toast confirms; verified copied string equals the visible JSON. |
-| FR-07.5 Data sync | ✅ Passed | Viewer re-populated after each successful request (e.g. Tokyo appeared after a search). |
-| FR-07.6 Scroll | ✅ Passed | `max-height` + overflow auto; long payload scrolls. |
-
-### FR-08 — Errors & exceptions
-
-| Scenario | Status | Evidence |
-| --- | --- | --- |
-| Empty city | ✅ Passed | Inline validation, no request. |
-| Invalid city | ✅ Passed | “City not found”, input retained, previous card kept. |
-| Invalid API key | ✅ Passed | Stub server with a bad key → fatal “API configuration error”. |
-| Rate limit | ✅ Passed (simulated 429) | “Weather service is busy” + Retry. |
-| Internet unavailable | ✅ Passed (fetch rejection simulated) | “No internet connection” + Retry. |
-| API server unavailable | ✅ Passed (real local outage → 502) | “Service unavailable” + Retry; recovered via Retry after restart. |
-| Slow API | ✅ Passed (hanging request) | Loading overlay visible for 15s; then “The sky is taking too long”. |
-| Unexpected response | ✅ Passed | Malformed 200 and incomplete payload both → “Unexpected response”; previous data kept. |
-| No blank weather card | ✅ Passed | Data stays visible during updates/failures; fatal state replaces it only when no data exists. |
-| No partial replacement | ✅ Passed | Incomplete payload rejected before any render. |
-| Retry | ✅ Passed | Used successfully after a real outage. |
-| Stale response guard | ✅ Passed | Rapid London→Tokyo searches; only Tokyo could render (request sequence + AbortController). |
-
-The real WeatherAPI rate-limit and offline-network paths were not triggered against the live provider; their UI branches were exercised with controlled stubs. The real 502 outage, invalid key, invalid city, malformed payload and timeout paths were exercised end-to-end.
-
-### FR-09 — Responsive behaviour
-
-✅ Passed. 1440px: centred 1160px content, 2-column hero, 4 metric cards. 1000px: 2-column hero, 4 metrics. 768px: stacked hero, 2×2 metrics, 2-column details. 390px: stacked search/hero, 2×2 metrics, 1-column outlook rows, scrollable chips/hourly, JSON controls wrap. `scrollWidth === clientWidth` at 390, 768, 800 and 1440 — no horizontal page overflow.
-
-### FR-10 — WeatherAPI integration
-
-✅ Passed. `GET /v1/current.json` and `/v1/forecast.json` (proxy), automatic Mumbai load, key + city query parameters server-side, dynamic UI population, fresh data per search, error handling, no mock weather data. `WEATHER_API_KEY` is in `.env` locally and in Vercel env in production; the key is absent from client responses and bundles.
-
-### Non-functional
-
-| Category | Status | Notes |
-| --- | --- | --- |
-| Performance | ✅ | Static files, no framework/build; initial live request ~1.5s in local testing. |
-| API performance | ✅ | Loading feedback is synchronous before the request; 15s client timeout. |
-| Reliability | ✅ | Errors handled without blanking valid data; stale responses discarded. |
-| Security | ✅ | API key is server-side; dotfiles blocked by the dev server; no key in payloads. (Not a substitute for rotating keys/quota controls.) |
-| Maintainability | ✅ | Separate HTML/CSS/JS, small pure functions for mood/normalisation/rendering. |
-| Compatibility | ⚠️ Partially verified | Tested in Chromium; uses modern standard APIs (fetch, AbortController, Intl, backdrop-filter). Safari and Firefox were not executed in this environment. |
-| Accessibility | ✅ | Lighthouse 100 with JSON open; labelled search, live regions, `aria-busy`, tabs pattern, keyboard chips/buttons, focus return on Escape, skip link, reduced-motion support. Screen-reader testing was not performed. |
-| Responsiveness | ✅ | Verified at four widths, no horizontal overflow. |
-| Scalability | ✅ | Thresholds, moods, presets and API mapping are centralised and modular. |
-
-### Out of scope
-
-No login, database, profiles, history, forecasts beyond the provider response, notifications, payments, admin dashboard or backend services beyond the weather proxy were added.
+The Vercel project is currently not Git-linked, so a GitHub push does **not** trigger a new production deployment by itself. Run the two commands above to deploy an update.
 
 ---
 
-## Known limitations / incomplete items
+## Verification
 
-1. **5-day outlook is limited to 3 days by the WeatherAPI free plan.** The server requests `days=5`, but the free tier returns 3 forecast days. The UI derives its heading from the payload and shows **“3-Day Outlook”** with a note; it will automatically show 5 cards if the key is upgraded to a plan that returns 5 days. No mock days are added. This is the only functional requirement not fully met, and it is an external plan constraint.
-2. **Real rate-limit and offline states were simulated**, not triggered against the provider; the retry/error code paths were exercised.
-3. **Safari/Firefox were not tested** in this environment, although only standard modern APIs are used.
-4. **No automated test suite** is committed; testing was manual/scripted in Chromium. Suggested future work: Playwright tests for search, error mapping, preview modes and the JSON tabs.
-5. The free WeatherAPI key has a shared monthly quota; the proxy caches responses for 45 seconds per Vercel instance to reduce calls.
+Manual and scripted checks were run on **24 November 2026** in **Chromium 157** on Windows, against both the local server and the production URL. Live WeatherAPI values changed between runs; the examples below are snapshots.
+
+### Requirement checklist
+
+| Area | Status | Evidence |
+| --- | --- | --- |
+| Default city Mumbai + automatic current-weather request | ✅ Passed | Mumbai loaded on first paint from `/api/weather?q=Mumbai%2C%20India`; input and selected chip both showed Mumbai. |
+| Loading state on first load | ✅ Passed | Skeleton, spinner, “Fetching Mumbai's sky…”, `aria-busy="true"` observed before the response. |
+| Search button | ✅ Passed | Typed “Paris”, clicked Search, Paris/France rendered; one new API request. |
+| Enter key | ✅ Passed | Enter submitted London, New York and Berlin searches. |
+| Empty input | ✅ Passed | Inline “Enter a city name…” error, input marked `aria-invalid`, focus returned to it, **no** API request, previous city kept. |
+| Repeated searches | ✅ Passed | Paris searched twice without reload; JSON refreshed each time. |
+| Searched text retained | ✅ Passed | Input kept the typed text after success and after “City not found”. |
+| Exactly ten popular cities | ✅ Passed | Mumbai, Delhi, Bengaluru, Hyderabad, Chennai, Kolkata, Pune, Ahmedabad, New York, London; no Tokyo. |
+| Chips fetch, sync input, highlight | ✅ Passed | Every chip was clicked on local and production; city, input, one selected chip and JSON all updated. |
+| Current temperature °C | ✅ Passed | Hero showed the API `temp_c` (e.g. Mumbai 32.6 → 33). |
+| Wind in km/h | ✅ Passed | Primary card showed API `wind_kph` with direction/gust detail (e.g. 6.8 km/h E, gusts 14.6). |
+| Condition icon | ✅ Passed | Provider CDN icon loaded at 128×128 with condition-specific alt text. |
+| Condition text | ✅ Passed | “Smoky haze”, “Patchy rain nearby”, etc. rendered from the payload. |
+| City-local time | ✅ Passed | Eyebrow clock matched the payload `tz_id` (e.g. Asia/Kolkata); it refreshes every 30 seconds. |
+| Last updated | ✅ Passed | Provider update time shown in local time plus a relative “11 min ago”; also listed in details. |
+| °F, cloud, visibility, pressure | ✅ Passed | All derived from `temp_f`, `cloud`, `vis_km`, `pressure_mb`. |
+| Exactly three primary metrics | ✅ Passed | Three cards: Humidity (`humidity`), Wind (`wind_kph`), UV index (`uv`); secondary values sit in a separate details panel. |
+| Five moods + PRD copy | ✅ Passed | Each mood rendered the exact copy; priority and boundaries verified with controlled payloads. |
+| Mood boundaries | ✅ Passed | 10°C → Freeze Frame; 15°C and 32°C → Perfect Day; 20 km/h → Breezy Mode; snow beats temperature; rain beats heat. |
+| JSON formatted tab | ✅ Passed | `JSON.stringify(payload, null, 2)`, current-only, indented. |
+| JSON raw tab | ✅ Passed | Original one-line provider body preserved. |
+| JSON copy | ✅ Passed | Raw copy matched the real system clipboard; formatted copy matched the visible text through a Clipboard API spy (Windows normalises clipboard line endings). Toast shown. |
+| JSON scroll + tabs | ✅ Passed | Formatted JSON `scrollHeight` 960 px vs 358 px visible, `overflow-y: auto`; tabs switch by click and ArrowLeft/ArrowRight/Home/End. |
+| JSON refresh after success | ✅ Passed | Viewer city/payload changed after every successful chip and typed search. |
+| Invalid city | ✅ Passed | Real WeatherAPI 1006 + proxy 404 → “City not found”; previous city and JSON retained; no retry offered for a lookup error. |
+| Invalid/missing API key | ✅ Passed | Real provider rejected a bad key through the proxy (500 `INVALID_API_KEY`); UI fatal state rendered “API configuration error” with no retry. Missing key also mapped to `API_KEY_MISSING`. |
+| Rate limit | ⚠️ Exercised with a controlled 429 | “Temporary service error” + Retry; real provider quota was not exhausted. |
+| Offline/network failure | ⚠️ Exercise via failed fetch | Fetch rejection and a real local connection abort both produced “No internet connection”; valid data stayed visible. OS-level airplane mode was not used. |
+| Server outage | ⚠️ Exercised with a controlled 502 | “Service unavailable” + Retry; Retry recovered to Mumbai after a fixture success. Real provider outage was not triggered. |
+| Timeout | ⚠️ Exercised with a hanging request | Loading stayed visible, then “The sky is taking too long” at the 15 s client timeout; previous data retained. |
+| Malformed/partial payload | ✅ Passed | A 200 HTML response → “Unexpected response”; a 200 partial `current` object was rejected with the previous card still visible. |
+| Stale response protection | ✅ Passed | A delayed London response could not overwrite the newer Delhi result; sequence + abort guard held. |
+| Responsive, no horizontal overflow | ✅ Passed | 320/390/768/1024/1440 px: `scrollWidth === clientWidth`; hero stacks, metrics become one column at ≤720 px, chips scroll horizontally inside their own strip. |
+| Keyboard accessibility | ✅ Passed | Enter search, focusable controls, skip link, labelled input, visible tab order, roving JSON tabs. Axe-core 4.10.2 (WCAG A/AA) reported **0 violations** locally and in production. |
+| Separate HTML/CSS/JS | ✅ Passed | No inline application logic; `index.html` links `css/styles.css` and `js/app.js`. |
+| Key never sent to the browser | ✅ Passed | Browser network log contained only the app's `/api/weather`; API response did not contain the key. |
+| No out-of-scope features | ✅ Passed | No hourly forecast, multi-day outlook, login, profiles, history, notifications or database. |
+
+### Production checks
+
+- Production URL: <https://skymood-eight.vercel.app>
+- Deployment: `dpl_HA2aABZvVGhmKyPeqwTMqErcTJTM` (production, ready).
+- Homepage 200; API 200 with `X-Weather-Endpoint: /v1/current.json`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`.
+- `/api/weather?q=London%2C%20United%20Kingdom` returned London/United Kingdom with **no** `forecast` property.
+- `/.env`, `/.env.local`, `/tools/dev_server.py`, `/README.md` and `/package.json` returned **404** in production.
+- A 39-check production regression (ten chips, a typed Enter search, API-value matching, JSON tabs/copy/scroll, 320/390/768/1440 px layouts, axe and console checks) passed on the final deployment with zero failures and zero console errors or uncaught exceptions.
+
+### Known limitations / incomplete items
+
+1. **Real rate limiting was not triggered.** The 429 UI path was exercised with a controlled response; the app's mapping of provider code 2007/HTTP 429 is implemented but the live account was not exhausted for testing.
+2. **Real provider outage and timeout were not induced at the provider.** The UI paths were exercised with controlled 502/hanging responses. A real bad key and a real unknown city were tested end-to-end through the proxy.
+3. **Offline testing used fetch failures and a real local connection abort**, not an OS-level network disconnect.
+4. **Only Chromium was tested.** Safari and Firefox were not executed in this environment; the app uses standard modern APIs (`fetch`, `AbortController`, `Intl`, backdrop-filter).
+5. **No screen-reader session was performed.** Axe-core reported no WCAG A/AA violations, and keyboard behaviour was tested directly.
+6. **No automated test suite is committed.** The checks above were run with temporary Chromium DevTools Protocol scripts; adding Playwright coverage would be the next quality step.
+7. **The Vercel project is not Git-linked.** Deployments are driven by the Vercel CLI; GitHub pushes alone do not redeploy.
+8. The mood is an app-generated interpretation, **not safety advice**.
+
+No in-scope functional requirement is currently known to be missing. The caveats above are test-coverage and delivery-process limitations.
+
+---
 
 ## Credits
 
-Weather data by [WeatherAPI.com](https://www.weatherapi.com/). SkyMood’s recommendations are playful interpretations, not safety advice.
+Weather data by [WeatherAPI.com](https://www.weatherapi.com/). SkyMood's vibes are playful interpretations, not safety advice.

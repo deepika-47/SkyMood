@@ -1,0 +1,13 @@
+# Keep secrets and developer-only files out of the Vercel deployment.
+.env
+.env.*
+.vercel
+.git
+.gitignore
+.vercelignore
+node_modules
+__pycache__
+*.pyc
+tools
+README.md
+package.json
