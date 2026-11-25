@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#38BDF8" />
   <meta
     name="description"
-    content="SkyMood — know the sky, plan your day. Live current conditions, a simple daily vibe and the untouched WeatherAPI response for any city."
+    content="SkyMood — know the sky, plan your day. Current conditions, a daily vibe, hourly weather, a five-day outlook and playful mood previews for any city."
   />
   <title>SkyMood — Know the sky, plan your day.</title>
 
@@ -23,21 +23,23 @@
     href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23FDE68A'/%3E%3Cstop offset='1' stop-color='%23FB923C'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='%230F172A'/%3E%3Ccircle cx='32' cy='32' r='13' fill='url(%23g)'/%3E%3C/svg%3E"
   />
 </head>
-<body data-mood="clear">
+<body data-mood="pleasant">
   <a class="skip-link" href="#main">Skip to weather</a>
 
   <!-- Cross-faded gradient layers keep the sky transition smooth. -->
-  <div class="sky-layer is-active" id="skyLayerA" aria-hidden="true"></div>
+  <div class="sky-layer is-active" id="skyLayerA" aria-hidden="true"
+       style="background: linear-gradient(180deg, #38BDF8 0%, #818CF8 100%)"></div>
   <div class="sky-layer" id="skyLayerB" aria-hidden="true"></div>
-  <div class="sky-aurora" aria-hidden="true">
-    <span class="orb orb--one"></span>
-    <span class="orb orb--two"></span>
-    <span class="orb orb--three"></span>
+  <div class="sky-glow" aria-hidden="true">
+    <span class="sky-glow__orb sky-glow__orb--one"></span>
+    <span class="sky-glow__orb sky-glow__orb--two"></span>
+    <span class="sky-glow__orb sky-glow__orb--three"></span>
   </div>
+  <div class="sky-shade" aria-hidden="true"></div>
 
   <div class="page">
     <header class="topbar">
-      <a class="brand" href="./">
+      <a class="brand" href="./" aria-label="SkyMood home">
         <span class="brand__mark" aria-hidden="true">
           <svg viewBox="0 0 32 32" fill="none">
             <circle cx="16" cy="16" r="7" fill="url(#brandSun)" />
@@ -60,13 +62,13 @@
 
       <span class="live-badge">
         <span class="live-dot" aria-hidden="true"></span>
-        Live weather
+        <span class="live-badge__label">Live weather</span>
       </span>
     </header>
 
     <main id="main">
       <section class="search-block" aria-labelledby="searchHeading">
-        <h1 class="sr-only" id="searchHeading">Search for a city's current weather</h1>
+        <h1 class="sr-only" id="searchHeading">Search for a city's weather and forecast</h1>
 
         <form class="search-shell" id="searchForm" role="search" novalidate>
           <svg class="search-shell__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
@@ -98,23 +100,38 @@
 
         <p class="field-error" id="fieldError" role="alert" hidden></p>
 
-        <div class="chips" id="cityChips" role="group" aria-label="Popular cities"></div>
+        <div class="presets">
+          <span class="presets__label">Quick switch</span>
+          <div class="chips" id="cityChips" role="group" aria-label="Popular cities"></div>
+        </div>
+
+        <section class="mood-lab glass" aria-labelledby="moodLabTitle">
+          <div class="mood-lab__head">
+            <div>
+              <p class="eyebrow eyebrow--tight" id="moodLabTitle">Mood lab</p>
+              <p class="mood-lab__hint">Preview all six skies and their alerts.</p>
+            </div>
+            <span class="mood-lab__note">App-generated</span>
+          </div>
+          <div class="mood-options" id="moodOptions" role="group" aria-label="Weather mood preview"></div>
+        </section>
       </section>
 
       <div class="weather-stage" id="weatherStage">
         <!-- Initial load -->
         <section class="skeleton glass" id="initialSkeleton" role="status" aria-live="polite">
-          <div class="skeleton__top">
-            <div>
-              <span class="skeleton__line skeleton__line--eyebrow"></span>
-              <span class="skeleton__line skeleton__line--title"></span>
-              <span class="skeleton__line skeleton__line--sub"></span>
-            </div>
-            <span class="skeleton__orb"></span>
-          </div>
-          <div class="skeleton__bottom">
+          <div class="skeleton__hero">
+            <span class="skeleton__line skeleton__line--eyebrow"></span>
+            <span class="skeleton__line skeleton__line--title"></span>
+            <span class="skeleton__line skeleton__line--sub"></span>
             <span class="skeleton__line skeleton__line--temp"></span>
-            <span class="skeleton__line skeleton__line--badge"></span>
+            <span class="skeleton__line skeleton__line--wide"></span>
+          </div>
+          <div class="skeleton__vibe">
+            <span class="skeleton__line skeleton__line--eyebrow"></span>
+            <span class="skeleton__line skeleton__line--title"></span>
+            <span class="skeleton__line skeleton__line--wide"></span>
+            <span class="skeleton__line skeleton__line--wide"></span>
           </div>
           <p class="loading-caption">
             <span class="spinner" aria-hidden="true"></span>
@@ -165,119 +182,162 @@
 
         <!-- Weather content -->
         <div class="weather-content" id="weatherContent" hidden>
-          <section class="hero glass" aria-labelledby="cityName">
-            <div class="hero__main">
-              <p class="eyebrow">
-                <span class="live-dot" aria-hidden="true"></span>
-                Current weather
-                <span class="eyebrow__time" id="localTime">—</span>
-              </p>
+          <section class="hero" aria-labelledby="cityName">
+            <div class="hero-card glass">
+              <div class="hero__top">
+                <p class="eyebrow">
+                  <span class="live-dot" aria-hidden="true"></span>
+                  Current sky
+                  <span class="eyebrow__time" id="localTime">—</span>
+                </p>
+                <span class="preview-chip" id="previewBadge" hidden>Mood preview</span>
+              </div>
 
-              <h2 class="hero__city" id="cityName">—</h2>
-              <p class="hero__region" id="region">—</p>
+              <div class="hero__city-row">
+                <div>
+                  <h2 class="hero__city" id="cityName">—</h2>
+                  <p class="hero__region" id="region">—</p>
+                </div>
+                <img class="hero__icon" id="condIcon" src="" alt="" width="112" height="112" decoding="async" />
+              </div>
 
               <div class="hero__temp-row">
                 <p class="hero__temp">
-                  <span class="hero__temp-num" id="tempC">—</span><span class="hero__temp-deg" aria-hidden="true">°C</span>
+                  <span class="hero__temp-num" id="tempC">—</span><span class="sr-only"> degrees Celsius</span><span class="hero__temp-deg" aria-hidden="true">°C</span>
                 </p>
-                <img class="hero__icon" id="condIcon" src="" alt="" width="96" height="96" decoding="async" />
+                <div class="hero__temp-meta">
+                  <span class="hero__feels" id="feelsLikeHero">Feels like —</span>
+                  <span class="hero__highlow" id="highLow">— / —</span>
+                </div>
               </div>
 
-              <div class="hero__meta">
-                <span class="condition-badge" id="condText">—</span>
-                <span class="hero__separator" aria-hidden="true"></span>
-                <span class="hero__local-note">Live from WeatherAPI</span>
+              <div class="hero__bottom">
+                <div class="hero__badges">
+                  <span class="condition-badge" id="condText">—</span>
+                  <span class="hero__source">Live from WeatherAPI</span>
+                </div>
+                <p class="hero__updated" id="lastUpdatedPill">—</p>
               </div>
-
-              <p class="hero__updated" id="lastUpdatedPill">—</p>
             </div>
 
-            <div class="vibe" id="vibeCard" aria-labelledby="vibeTitle">
+            <section class="vibe-card glass" id="vibeCard" aria-labelledby="vibeTitle">
               <div class="vibe__head">
-                <span class="vibe__kicker">Today's vibe</span>
+                <span class="eyebrow eyebrow--tight">Today's vibe</span>
                 <span class="vibe__generated">App-generated</span>
               </div>
               <span class="vibe__emoji" id="vibeEmoji" aria-hidden="true">—</span>
               <h3 class="vibe__title" id="vibeTitle">—</h3>
               <p class="vibe__text" id="vibeText">—</p>
-              <p class="vibe__reason" id="vibeReason">—</p>
-            </div>
-          </section>
-
-          <section class="metrics" aria-label="Primary weather metrics">
-            <article class="metric glass">
-              <span class="metric__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                  <path d="M12 3.5S6 10.4 6 14.3a6 6 0 0 0 12 0c0-3.9-6-10.8-6-10.8Z" />
-                  <path d="M9.5 15.2a2.8 2.8 0 0 0 2.8 2.8" />
-                </svg>
-              </span>
-              <span class="metric__label">Humidity</span>
-              <span class="metric__value" id="humidity">—</span>
-              <span class="metric__sub" id="humiditySub">—</span>
-            </article>
-
-            <article class="metric glass">
-              <span class="metric__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                  <path d="M3 8.5h11.5a2.8 2.8 0 1 0-2.8-2.8" />
-                  <path d="M3 13h16a2.8 2.8 0 1 1-2.8 2.8" />
-                  <path d="M3 17.5h7" />
-                </svg>
-              </span>
-              <span class="metric__label">Wind</span>
-              <span class="metric__value" id="wind">—</span>
-              <span class="metric__sub" id="windSub">—</span>
-            </article>
-
-            <article class="metric glass">
-              <span class="metric__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                  <circle cx="12" cy="12" r="4.2" />
-                  <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7" />
-                </svg>
-              </span>
-              <span class="metric__label">UV index</span>
-              <span class="metric__value" id="uv">—</span>
-              <span class="metric__sub" id="uvSub">—</span>
-            </article>
-          </section>
-
-          <section class="details glass" aria-label="Additional weather details">
-            <div class="details__item">
-              <span class="details__label">Cloud cover</span>
-              <span class="details__value" id="cloud">—</span>
-            </div>
-            <div class="details__item">
-              <span class="details__label">Visibility</span>
-              <span class="details__value" id="visibility">—</span>
-            </div>
-            <div class="details__item">
-              <span class="details__label">Pressure</span>
-              <span class="details__value" id="pressure">—</span>
-            </div>
-            <div class="details__item">
-              <span class="details__label">Wind speed &amp; direction</span>
-              <span class="details__value" id="windDetail">—</span>
-            </div>
-            <div class="details__item">
-              <span class="details__label">In Fahrenheit</span>
-              <span class="details__value" id="tempF">—</span>
-            </div>
-            <div class="details__item">
-              <span class="details__label">Last updated</span>
-              <span class="details__value" id="updated">—</span>
-            </div>
-          </section>
-
-          <section class="panel panel--json glass" id="jsonSection" aria-labelledby="jsonTitle">
-            <div class="panel__head panel__head--wrap">
-              <div>
-                <h3 class="panel__title" id="jsonTitle">API response viewer</h3>
-                <p class="panel__sub" id="jsonMeta">Formatted and raw WeatherAPI data</p>
+              <div class="vibe__foot">
+                <p class="vibe__reason" id="vibeReason">—</p>
+                <button type="button" class="btn btn--solid btn--small vibe__copy" id="copyVibeBtn">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2.5" />
+                    <path d="M15 5.5A2.5 2.5 0 0 0 12.5 3H6.5A2.5 2.5 0 0 0 4 5.5v6A2.5 2.5 0 0 0 6.5 14" />
+                  </svg>
+                  Copy vibe
+                </button>
               </div>
-              <div class="json-controls">
-                <div class="tabs" role="tablist" aria-label="JSON view">
+            </section>
+          </section>
+
+          <section class="hourly glass" aria-labelledby="hourlyTitle">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow eyebrow--tight">Hour by hour</p>
+                <h2 class="section-title" id="hourlyTitle">Next 24 hours</h2>
+              </div>
+              <div class="scroll-controls">
+                <button type="button" class="btn btn--solid btn--icon btn--small" id="hourlyPrev" aria-label="Scroll hourly forecast left">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <path d="m15 6-6 6 6 6" />
+                  </svg>
+                </button>
+                <button type="button" class="btn btn--solid btn--icon btn--small" id="hourlyNext" aria-label="Scroll hourly forecast right">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <path d="m9 6 6 6-6 6" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="hourly__track" id="hourlyTrack" tabindex="0" role="group" aria-label="Hourly forecast, scroll horizontally"></div>
+          </section>
+
+          <div class="forecast-layout">
+            <section class="outlook glass" aria-labelledby="outlookTitle">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow eyebrow--tight">Five-day outlook</p>
+                  <h2 class="section-title" id="outlookTitle">Plan the week</h2>
+                </div>
+              </div>
+              <ol class="outlook__list" id="outlookList"></ol>
+            </section>
+
+            <section class="quick" aria-labelledby="quickTitle">
+              <h2 class="sr-only" id="quickTitle">Quick weather metrics</h2>
+              <div class="quick__grid">
+                <article class="metric glass">
+                  <span class="metric__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                      <path d="M12 3.5S6 10.4 6 14.3a6 6 0 0 0 12 0c0-3.9-6-10.8-6-10.8Z" />
+                      <path d="M9.5 15.2a2.8 2.8 0 0 0 2.8 2.8" />
+                    </svg>
+                  </span>
+                  <span class="metric__label">Humidity</span>
+                  <span class="metric__value" id="humidity">—</span>
+                  <span class="metric__sub" id="humiditySub">—</span>
+                </article>
+
+                <article class="metric glass">
+                  <span class="metric__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                      <path d="M3 8.5h11.5a2.8 2.8 0 1 0-2.8-2.8" />
+                      <path d="M3 13h16a2.8 2.8 0 1 1-2.8 2.8" />
+                      <path d="M3 17.5h7" />
+                    </svg>
+                  </span>
+                  <span class="metric__label">Wind</span>
+                  <span class="metric__value" id="wind">—</span>
+                  <span class="metric__sub" id="windSub">—</span>
+                </article>
+
+                <article class="metric glass">
+                  <span class="metric__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                      <circle cx="12" cy="12" r="4.2" />
+                      <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7" />
+                    </svg>
+                  </span>
+                  <span class="metric__label">UV index</span>
+                  <span class="metric__value" id="uv">—</span>
+                  <span class="metric__sub" id="uvSub">—</span>
+                </article>
+
+                <article class="metric glass">
+                  <span class="metric__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                      <path d="M12 3.5v11" />
+                      <path d="M8.2 7.3 12 3.5l3.8 3.8" />
+                      <path d="M5.5 15.2a6.5 6.5 0 0 0 13 0" />
+                    </svg>
+                  </span>
+                  <span class="metric__label">Feels like</span>
+                  <span class="metric__value" id="feelsLike">—</span>
+                  <span class="metric__sub" id="feelsLikeSub">—</span>
+                </article>
+              </div>
+            </section>
+          </div>
+
+          <details class="data-nook glass" id="dataNook">
+            <summary class="data-nook__summary">
+              <span>Weather data</span>
+              <span class="data-nook__meta">WeatherAPI · /v1/forecast.json</span>
+            </summary>
+            <div class="data-nook__body">
+              <div class="data-nook__bar">
+                <div class="tabs" role="tablist" aria-label="Weather data view">
                   <button type="button" class="tab is-active" id="tabFormatted" role="tab" aria-selected="true" aria-controls="jsonPanel" tabindex="0">Formatted</button>
                   <button type="button" class="tab" id="tabRaw" role="tab" aria-selected="false" aria-controls="jsonPanel" tabindex="-1">Raw</button>
                 </div>
@@ -288,18 +348,12 @@
                   </svg>
                   Copy
                 </button>
-                <button type="button" class="btn btn--glass btn--icon btn--small" id="jsonToggle" aria-expanded="false" aria-controls="jsonPanel" aria-label="Show API response">
-                  <svg class="icon icon--chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                    <path d="m6 9 6 6 6-6" />
-                  </svg>
-                </button>
+              </div>
+              <div class="json-panel" id="jsonPanel" role="tabpanel" aria-labelledby="tabFormatted">
+                <pre class="json-pre" id="jsonPre" tabindex="0" aria-label="Weather API JSON response"><code id="jsonCode"></code></pre>
               </div>
             </div>
-            <div class="json-panel" id="jsonPanel" role="tabpanel" aria-labelledby="tabFormatted" hidden>
-              <p class="json-note">Served through SkyMood's API layer — the weather payload is unmodified WeatherAPI <code>/v1/current.json</code> data.</p>
-              <pre class="json-pre" id="jsonPre" tabindex="0" aria-label="Weather API JSON response"><code id="jsonCode"></code></pre>
-            </div>
-          </section>
+          </details>
         </div>
 
         <div class="loading-overlay" id="loadingOverlay" hidden>
@@ -315,7 +369,7 @@
       <p>
         Weather data by
         <a href="https://www.weatherapi.com/" target="_blank" rel="noopener noreferrer">WeatherAPI.com</a>.
-        SkyMood's vibe is an app-generated interpretation, not safety advice.
+        SkyMood's vibes are an app-generated interpretation, not safety advice.
       </p>
       <p class="footer__meta">Built with vanilla HTML, CSS &amp; JavaScript.</p>
     </footer>

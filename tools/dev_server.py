@@ -10,6 +10,7 @@ Usage: python tools/dev_server.py [port]
 
 from __future__ import annotations
 
+import datetime
 import json
 import mimetypes
 import os
@@ -22,6 +23,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(ROOT, ".env")
 WEATHER_BASE = "https://api.weatherapi.com/v1"
+FORECAST_DAYS = 5
 ALLOWED_EXTENSIONS = {".html", ".css", ".js", ".svg", ".png", ".ico", ".json", ".webmanifest", ".txt"}
 KEY_ERROR_CODES = {1002, 1007, 2006, 2008, 2009, 2010}
 BAD_REQUEST_CODES = {1003, 1004, 1005}
@@ -70,13 +72,20 @@ def map_error(status: int, body: dict) -> UpstreamError:
     return UpstreamError(502, "UPSTREAM_UNAVAILABLE", "Unexpected upstream response.")
 
 
-def fetch_current(query: str) -> dict:
+def add_days(date_string: str, offset: int) -> str:
+    base = datetime.date.fromisoformat(date_string)
+    return (base + datetime.timedelta(days=offset)).isoformat()
+
+
+def request_forecast(query: str, extra_params: dict | None = None) -> dict:
     params = {
         "key": os.environ.get("WEATHER_API_KEY", ""),
         "q": query,
         "aqi": "no",
+        "alerts": "no",
     }
-    url = f"{WEATHER_BASE}/current.json?{urllib.parse.urlencode(params)}"
+    params.update(extra_params or {"days": str(FORECAST_DAYS)})
+    url = f"{WEATHER_BASE}/forecast.json?{urllib.parse.urlencode(params)}"
     request = urllib.request.Request(
         url,
         headers={"Accept": "application/json", "User-Agent": "SkyMood-dev-server/1.0"},
@@ -86,8 +95,15 @@ def fetch_current(query: str) -> dict:
             payload = json.loads(response.read().decode("utf-8"))
             if payload.get("error"):
                 raise map_error(200, payload)
-            if not isinstance(payload.get("location"), dict) or not isinstance(payload.get("current"), dict):
-                raise UpstreamError(502, "UNEXPECTED_RESPONSE", "WeatherAPI returned an incomplete response.")
+            forecast = payload.get("forecast")
+            if (
+                not isinstance(payload.get("location"), dict)
+                or not isinstance(payload.get("current"), dict)
+                or not isinstance(forecast, dict)
+                or not isinstance(forecast.get("forecastday"), list)
+                or not forecast["forecastday"]
+            ):
+                raise UpstreamError(502, "UNEXPECTED_RESPONSE", "WeatherAPI returned an incomplete forecast.")
             return payload
     except urllib.error.HTTPError as error:
         try:
@@ -99,6 +115,30 @@ def fetch_current(query: str) -> dict:
         raise
     except Exception as error:  # network / timeout / bad JSON
         raise UpstreamError(502, "SERVICE_UNAVAILABLE", f"Could not reach WeatherAPI: {error}") from error
+
+
+def fetch_forecast(query: str) -> dict:
+    payload = request_forecast(query)
+    days = payload["forecast"]["forecastday"]
+
+    if len(days) < FORECAST_DAYS:
+        # The free WeatherAPI plan caps one request at three days, but its
+        # per-date `dt` parameter still serves later dates. Assemble a real
+        # five-day payload without inventing any values.
+        last_date = days[-1]["date"]
+        for offset in range(1, FORECAST_DAYS - len(days) + 1):
+            expected = add_days(last_date, offset)
+            extra = request_forecast(query, {"dt": expected, "days": "1"})
+            matching = next(
+                (entry for entry in extra["forecast"]["forecastday"] if entry.get("date") == expected),
+                None,
+            )
+            if not matching:
+                raise UpstreamError(502, "UPSTREAM_UNAVAILABLE", "WeatherAPI did not return the requested forecast date.")
+            days.append(matching)
+
+    payload["forecast"]["forecastday"] = days
+    return payload
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -116,7 +156,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("X-Weather-Provider", "WeatherAPI.com")
-        self.send_header("X-Weather-Endpoint", "/v1/current.json")
+        self.send_header("X-Weather-Endpoint", "/v1/forecast.json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -163,7 +203,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         try:
-            self.send_json(200, fetch_current(query))
+            self.send_json(200, fetch_forecast(query))
         except UpstreamError as error:
             self.send_json(
                 error.status,

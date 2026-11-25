@@ -5,15 +5,16 @@
  *
  * GET /api/weather?q=Mumbai
  *
- * Keeps the WeatherAPI key in the server environment and requests only a
- * location's current conditions. Successful responses pass the WeatherAPI
- * body through untouched, so the client-side JSON viewer shows the real
- * provider response.
+ * Keeps the WeatherAPI key in the server environment and requests current
+ * conditions plus a five-day forecast, including hourly entries. Successful
+ * responses pass the WeatherAPI body through untouched, so the client-side
+ * JSON viewer shows the real provider response.
  */
 
 const WEATHER_BASE = "https://api.weatherapi.com/v1";
 const UPSTREAM_TIMEOUT_MS = 10000;
 const MAX_QUERY_LENGTH = 80;
+const FORECAST_DAYS = 5;
 
 const KEY_ERROR_CODES = new Set([1002, 1007, 2006, 2008, 2009, 2010]);
 const BAD_REQUEST_CODES = new Set([1003, 1004, 1005]);
@@ -39,6 +40,13 @@ function getApiKey() {
 function cleanQuery(raw) {
   if (typeof raw !== "string") return "";
   return raw.replace(/\s+/g, " ").trim();
+}
+
+function addDays(dateString, offset) {
+  const [year, month, day] = String(dateString).split("-").map(Number);
+  if (!year || !month || !day) return "";
+  const date = new Date(Date.UTC(year, month - 1, day + offset));
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
 
 function mapUpstreamError(status, body) {
@@ -91,11 +99,15 @@ function mapUpstreamError(status, body) {
   };
 }
 
-async function fetchCurrent(apiKey, query) {
-  const url = new URL(`${WEATHER_BASE}/current.json`);
+async function fetchForecastJson(apiKey, query, extraParams = {}) {
+  const url = new URL(`${WEATHER_BASE}/forecast.json`);
   url.searchParams.set("key", apiKey);
   url.searchParams.set("q", query);
   url.searchParams.set("aqi", "no");
+  url.searchParams.set("alerts", "no");
+  Object.entries(extraParams).forEach(([key, value]) => {
+    url.searchParams.set(key, String(value));
+  });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
@@ -119,8 +131,8 @@ async function fetchCurrent(apiKey, query) {
       throw mapUpstreamError(response.status, body);
     }
 
-    // Validate that this is a complete current-conditions response before
-    // handing the untouched provider body to the browser.
+    // Validate that this is a complete forecast response before handing the
+    // provider body to the browser.
     let parsed = null;
     try {
       parsed = JSON.parse(text);
@@ -136,6 +148,9 @@ async function fetchCurrent(apiKey, query) {
       !parsed ||
       !parsed.location ||
       !parsed.current ||
+      !parsed.forecast ||
+      !Array.isArray(parsed.forecast.forecastday) ||
+      !parsed.forecast.forecastday.length ||
       typeof parsed.current.temp_c !== "number" ||
       typeof parsed.location.name !== "string" ||
       typeof parsed.location.tz_id !== "string"
@@ -143,11 +158,11 @@ async function fetchCurrent(apiKey, query) {
       throw {
         status: 502,
         code: "UNEXPECTED_RESPONSE",
-        message: "WeatherAPI returned an incomplete weather response.",
+        message: "WeatherAPI returned an incomplete forecast response.",
       };
     }
 
-    return text;
+    return { parsed, text };
   } catch (error) {
     if (error && error.code) throw error;
     if (error && error.name === "AbortError") {
@@ -165,6 +180,45 @@ async function fetchCurrent(apiKey, query) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchForecast(apiKey, query) {
+  const base = await fetchForecastJson(apiKey, query, { days: FORECAST_DAYS });
+  const forecastDays = base.parsed.forecast.forecastday;
+
+  if (forecastDays.length >= FORECAST_DAYS) {
+    return base.text;
+  }
+
+  // WeatherAPI's free plan caps a single forecast request at three days but
+  // still serves individual dates through `dt`. Fill the remaining days with
+  // live provider data so the five-day outlook stays real.
+  const missing = FORECAST_DAYS - forecastDays.length;
+  const lastDate = forecastDays[forecastDays.length - 1].date;
+
+  const extras = await Promise.all(
+    Array.from({ length: missing }, (_, index) =>
+      fetchForecastJson(apiKey, query, { dt: addDays(lastDate, index + 1), days: 1 })
+    )
+  );
+
+  extras.forEach((extra, index) => {
+    const expectedDate = addDays(lastDate, index + 1);
+    const matching = extra.parsed.forecast.forecastday.find(
+      (entry) => entry && entry.date === expectedDate
+    );
+    if (!matching) {
+      throw {
+        status: 502,
+        code: "UPSTREAM_UNAVAILABLE",
+        message: "WeatherAPI did not return the requested forecast date.",
+      };
+    }
+    forecastDays.push(matching);
+  });
+
+  base.parsed.forecast.forecastday = forecastDays;
+  return JSON.stringify(base.parsed);
 }
 
 module.exports = async function handler(req, res) {
@@ -205,14 +259,14 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const rawBody = await fetchCurrent(apiKey, query);
+    const rawBody = await fetchForecast(apiKey, query);
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader("Cache-Control", "no-store, max-age=0");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("X-Weather-Provider", "WeatherAPI.com");
-    res.setHeader("X-Weather-Endpoint", "/v1/current.json");
+    res.setHeader("X-Weather-Endpoint", "/v1/forecast.json");
     return res.end(rawBody);
   } catch (error) {
     const status = error && error.status ? error.status : 500;

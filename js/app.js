@@ -1,6 +1,6 @@
 /* =========================================================
    SkyMood — app logic (vanilla JS, no dependencies)
-   Data: WeatherAPI.com /v1/current.json through /api/weather
+   Data: WeatherAPI.com /v1/forecast.json through /api/weather
    ========================================================= */
 
 (() => {
@@ -13,91 +13,121 @@
     API_ENDPOINT: "/api/weather",
     POPULAR_CITIES: [
       "Mumbai",
+      "Chennai",
+      "London",
+      "Tokyo",
+      "New York",
       "Delhi",
       "Bengaluru",
       "Hyderabad",
-      "Chennai",
       "Kolkata",
       "Pune",
       "Ahmedabad",
-      "New York",
-      "London",
     ],
     FETCH_TIMEOUT_MS: 15000,
     TOAST_MS: 2400,
+    HOURS_AHEAD: 24,
+    DAYS_AHEAD: 5,
   });
 
-  /* Interpretation thresholds. Priority is applied top-down in deriveMood(). */
   const THRESHOLDS = Object.freeze({
     COLD_C: 15,
     HOT_C: 32,
-    BREEZE_MIN_KPH: 20,
+    HOT_UV: 7,
+    PLEASANT_MIN_C: 22,
+    PLEASANT_MAX_C: 31,
+    BREEZE_MIN_C: 18,
+    BREEZE_MAX_C: 25,
+    BREEZE_WIND_KPH: 20,
   });
 
-  /* WeatherAPI can resolve a bare "Delhi" to a different place. Presets and
-     matching typed searches are qualified so the result stays predictable,
-     while the search field still shows what the person typed. */
+  /* WeatherAPI can resolve a bare city to a different region. Presets and
+     matching typed searches are qualified so results stay predictable, while
+     the search field always keeps what the person actually typed. */
   const CITY_QUERY_ALIASES = Object.freeze({
     mumbai: "Mumbai, India",
+    chennai: "Chennai, India",
+    london: "London, United Kingdom",
+    tokyo: "Tokyo, Japan",
+    "new york": "New York, United States",
     delhi: "Delhi, India",
     bengaluru: "Bengaluru, India",
     hyderabad: "Hyderabad, India",
-    chennai: "Chennai, India",
     kolkata: "Kolkata, India",
     pune: "Pune, India",
     ahmedabad: "Ahmedabad, India",
-    "new york": "New York, United States",
-    london: "London, United Kingdom",
   });
 
   const MOODS = Object.freeze({
+    scorching: {
+      key: "scorching",
+      previewLabel: "Scorching",
+      label: "Scorching / high UV",
+      title: "Sun Alert",
+      emoji: "☀️",
+      text: "Don't get eaten by the sun today—stay shaded and hydrated!",
+      gradient: "linear-gradient(180deg, #FF7E5F 0%, #FEB47B 100%)",
+      dot: "#FF7E5F",
+      theme: "#FF7E5F",
+    },
+    pleasant: {
+      key: "pleasant",
+      previewLabel: "Pleasant",
+      label: "Clear / pleasant",
+      title: "Perfect Day",
+      emoji: "🌤️",
+      text: "Clear skies ahead—plan a day out with your loved ones!",
+      gradient: "linear-gradient(180deg, #38BDF8 0%, #818CF8 100%)",
+      dot: "#38BDF8",
+      theme: "#38BDF8",
+    },
+    breezy: {
+      key: "breezy",
+      previewLabel: "Breezy",
+      label: "Breezy / mild",
+      title: "Breezy Mode",
+      emoji: "🌀",
+      text: "A cool breeze that touches your soul—step outside and enjoy!",
+      gradient: "linear-gradient(180deg, #2DD4BF 0%, #3B82F6 100%)",
+      dot: "#2DD4BF",
+      theme: "#2DD4BF",
+    },
+    rainy: {
+      key: "rainy",
+      previewLabel: "Rainy",
+      label: "Rainy / storm",
+      title: "Rain Check",
+      emoji: "☔",
+      text: "Step out with an umbrella—don't get soaked!",
+      gradient: "linear-gradient(180deg, #334155 0%, #0F172A 100%)",
+      dot: "#334155",
+      theme: "#334155",
+    },
     cold: {
       key: "cold",
-      emoji: "❄️",
+      previewLabel: "Cold",
+      label: "Bone-chilling cold",
       title: "Freeze Frame",
-      text: "Bone-chilling cold ahead, cuddle up tight😉",
+      emoji: "❄️",
+      text: "Bone-chilling cold outside—cuddle up tight!",
+      gradient: "linear-gradient(180deg, #1E3A8A 0%, #312E81 100%)",
+      dot: "#1E3A8A",
+      theme: "#1E3A8A",
     },
-    clear: {
-      key: "clear",
-      emoji: "🌤️",
-      title: "Perfect Day",
-      text: "The weather looks great! Time to plan a day out with your loved ones🫂",
-    },
-    hot: {
-      key: "hot",
-      emoji: "☀️",
-      title: "Sun Alert",
-      text: "Don't get eaten by the sun today! Stay hydrated and slap on some SPF🌞",
-    },
-    rain: {
-      key: "rain",
-      emoji: "☔",
-      title: "Rain Check",
-      text: "Step out with an umbrella — don't get soaked☔",
-    },
-    breeze: {
-      key: "breeze",
-      emoji: "🌀",
-      title: "Breezy Mode",
-      text: "A cool breeze that touches your soul — step outside🌀",
+    night: {
+      key: "night",
+      previewLabel: "Clear night",
+      label: "Clear night",
+      title: "Clear Night",
+      emoji: "🌙",
+      text: "Starry skies ahead—sleep tight!",
+      gradient: "linear-gradient(180deg, #0F172A 0%, #1E1B4B 100%)",
+      dot: "#0F172A",
+      theme: "#0F172A",
     },
   });
 
-  const GRADIENTS = Object.freeze({
-    hot: "linear-gradient(180deg, #FF7E5F 0%, #FEB47B 100%)",
-    clear: "linear-gradient(180deg, #38BDF8 0%, #818CF8 100%)",
-    breeze: "linear-gradient(180deg, #2DD4BF 0%, #3B82F6 100%)",
-    rain: "linear-gradient(180deg, #334155 0%, #0F172A 100%)",
-    cold: "linear-gradient(180deg, #1E3A8A 0%, #312E81 100%)",
-  });
-
-  const THEME_COLORS = Object.freeze({
-    hot: "#FF7E5F",
-    clear: "#38BDF8",
-    breeze: "#2DD4BF",
-    rain: "#334155",
-    cold: "#1E3A8A",
-  });
+  const MOOD_ORDER = Object.freeze(["scorching", "pleasant", "breezy", "rainy", "cold", "night"]);
 
   const GENERIC_ICON =
     "data:image/svg+xml;charset=utf-8," +
@@ -186,8 +216,9 @@
     loading: false,
     requestSeq: 0,
     controller: null,
-    theme: "",
+    theme: "pleasant",
     frontLayer: "a",
+    previewMood: null,
     json: { formatted: "", raw: "", tab: "formatted" },
     clockTimer: null,
     toastTimer: null,
@@ -209,6 +240,7 @@
     searchSpinner: $("searchSpinner"),
     fieldError: $("fieldError"),
     chips: $("cityChips"),
+    moodOptions: $("moodOptions"),
     stage: $("weatherStage"),
     skeleton: $("initialSkeleton"),
     skeletonText: $("skeletonText"),
@@ -231,30 +263,32 @@
     tempC: $("tempC"),
     condIcon: $("condIcon"),
     condText: $("condText"),
+    feelsLikeHero: $("feelsLikeHero"),
+    highLow: $("highLow"),
     lastUpdatedPill: $("lastUpdatedPill"),
+    previewBadge: $("previewBadge"),
     vibeCard: $("vibeCard"),
     vibeEmoji: $("vibeEmoji"),
     vibeTitle: $("vibeTitle"),
     vibeText: $("vibeText"),
     vibeReason: $("vibeReason"),
+    copyVibeBtn: $("copyVibeBtn"),
+    hourlyTrack: $("hourlyTrack"),
+    hourlyPrev: $("hourlyPrev"),
+    hourlyNext: $("hourlyNext"),
+    outlookList: $("outlookList"),
     humidity: $("humidity"),
     humiditySub: $("humiditySub"),
     wind: $("wind"),
     windSub: $("windSub"),
     uv: $("uv"),
     uvSub: $("uvSub"),
-    cloud: $("cloud"),
-    visibility: $("visibility"),
-    pressure: $("pressure"),
-    windDetail: $("windDetail"),
-    tempF: $("tempF"),
-    updated: $("updated"),
-    jsonSection: $("jsonSection"),
-    jsonToggle: $("jsonToggle"),
+    feelsLike: $("feelsLike"),
+    feelsLikeSub: $("feelsLikeSub"),
+    dataNook: $("dataNook"),
     jsonPanel: $("jsonPanel"),
     jsonPre: $("jsonPre"),
     jsonCode: $("jsonCode"),
-    jsonMeta: $("jsonMeta"),
     copyJsonBtn: $("copyJsonBtn"),
     tabFormatted: $("tabFormatted"),
     tabRaw: $("tabRaw"),
@@ -311,6 +345,25 @@
     return formatInZone(epochSeconds, timeZone, { hour: "numeric", minute: "2-digit" });
   }
 
+  function parseForecastDate(dateString) {
+    const [year, month, day] = String(dateString || "").split("-").map(Number);
+    if (!year || !month || !day) return null;
+    const date = new Date(Date.UTC(year, month - 1, day, 12));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function forecastWeekday(dateString) {
+    const date = parseForecastDate(dateString);
+    if (!date) return "—";
+    return new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(date);
+  }
+
+  function forecastDateLabel(dateString) {
+    const date = parseForecastDate(dateString);
+    if (!date) return "—";
+    return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(date);
+  }
+
   function relativeAgo(epochSeconds) {
     const diff = Math.max(0, Math.floor(Date.now() / 1000 - Number(epochSeconds)));
     if (!Number.isFinite(diff)) return "";
@@ -334,6 +387,21 @@
     };
     img.src = safeIcon(raw);
     img.alt = alt || "Weather condition icon";
+  }
+
+  function makeIcon(raw, alt, className, size) {
+    const img = create("img", className);
+    img.src = safeIcon(raw);
+    img.alt = alt;
+    img.width = size;
+    img.height = size;
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.onerror = () => {
+      img.onerror = null;
+      img.src = GENERIC_ICON;
+    };
+    return img;
   }
 
   function create(tag, className, text) {
@@ -390,21 +458,21 @@
   /* ----------------------------- Weather model ----------------------------- */
 
   function normalizeWeather(payload) {
-    if (
-      !payload ||
-      typeof payload !== "object" ||
-      !payload.location ||
-      !payload.current
-    ) {
+    if (!payload || typeof payload !== "object" || !payload.location || !payload.current) {
       throw new AppError("BAD_RESPONSE", "Missing location or current weather");
+    }
+    if (!payload.forecast || !Array.isArray(payload.forecast.forecastday) || !payload.forecast.forecastday.length) {
+      throw new AppError("BAD_RESPONSE", "Missing forecast data");
     }
 
     const location = payload.location;
     const current = payload.current;
+    const rawDays = payload.forecast.forecastday.slice(0, CONFIG.DAYS_AHEAD);
 
-    const numericFields = [
+    const currentNumbers = [
       current.temp_c,
       current.temp_f,
+      current.feelslike_c,
       current.humidity,
       current.wind_kph,
       current.uv,
@@ -419,10 +487,67 @@
       typeof location.tz_id !== "string" ||
       !current.condition ||
       typeof current.condition.text !== "string" ||
-      numericFields.some((value) => !Number.isFinite(Number(value)))
+      currentNumbers.some((value) => !Number.isFinite(Number(value)))
     ) {
       throw new AppError("BAD_RESPONSE", "Incomplete current weather");
     }
+
+    const daily = rawDays.map((entry) => {
+      if (
+        !entry ||
+        typeof entry.date !== "string" ||
+        !entry.day ||
+        !entry.day.condition ||
+        typeof entry.day.condition.text !== "string" ||
+        !Number.isFinite(Number(entry.day.maxtemp_c)) ||
+        !Number.isFinite(Number(entry.day.mintemp_c))
+      ) {
+        throw new AppError("BAD_RESPONSE", "Incomplete daily forecast");
+      }
+      return {
+        date: entry.date,
+        maxC: Number(entry.day.maxtemp_c),
+        minC: Number(entry.day.mintemp_c),
+        condition: entry.day.condition.text,
+        conditionIcon: entry.day.condition.icon || "",
+        chanceRain: Number(entry.day.daily_chance_of_rain) || 0,
+        uv: Number(entry.day.uv) || 0,
+        sunrise: entry.astro && entry.astro.sunrise ? entry.astro.sunrise : "",
+        sunset: entry.astro && entry.astro.sunset ? entry.astro.sunset : "",
+      };
+    });
+
+    if (!daily.length) {
+      throw new AppError("BAD_RESPONSE", "Empty daily forecast");
+    }
+
+    const allHours = rawDays.flatMap((entry) => (Array.isArray(entry.hour) ? entry.hour : []));
+    const nowEpoch = Number(location.localtime_epoch) || Date.now() / 1000;
+    const validHours = allHours.filter(
+      (entry) =>
+        entry &&
+        Number.isFinite(Number(entry.time_epoch)) &&
+        Number.isFinite(Number(entry.temp_c)) &&
+        entry.condition &&
+        typeof entry.condition.text === "string"
+    );
+    const upcomingHours = validHours
+      .filter((entry) => Number(entry.time_epoch) >= nowEpoch - 1800)
+      .slice(0, CONFIG.HOURS_AHEAD);
+    const hourlySource = upcomingHours.length ? upcomingHours : validHours.slice(0, CONFIG.HOURS_AHEAD);
+
+    if (!hourlySource.length) {
+      throw new AppError("BAD_RESPONSE", "Missing hourly forecast");
+    }
+
+    const hourly = hourlySource.map((entry) => ({
+      epoch: Number(entry.time_epoch),
+      tempC: Number(entry.temp_c),
+      condition: entry.condition.text,
+      conditionIcon: entry.condition.icon || "",
+      isDay: Number(entry.is_day) === 1,
+      chanceRain: Number(entry.chance_of_rain) || 0,
+    }));
 
     return {
       city: location.name,
@@ -431,6 +556,7 @@
       tz: location.tz_id,
       tempC: Number(current.temp_c),
       tempF: Number(current.temp_f),
+      feelsLikeC: Number(current.feelslike_c),
       humidity: Number(current.humidity),
       windKph: Number(current.wind_kph),
       windDir: current.wind_dir || "",
@@ -443,59 +569,103 @@
       conditionIcon: current.condition.icon || "",
       isDay: Number(current.is_day) === 1,
       lastUpdatedEpoch: Number(current.last_updated_epoch),
+      daily,
+      hourly,
       fetchedAt: Date.now(),
     };
   }
 
-  /* Priority when conditions overlap:
-     1. Snow / ice / freezing                         → Freeze Frame
-     2. Rain / drizzle / showers / thunder / storms   → Rain Check
-     3. Below 15°C                                    → Freeze Frame
-     4. Above 32°C                                    → Sun Alert
-     5. Wind at or above 20 km/h                      → Breezy Mode
-     6. Everything else                               → Perfect Day
-     The first matching rule wins. */
+  /* Mood priority (first match wins). "Clear" means no rain/snow/fog/haze/
+     smoke/dust in the condition and either a clear/sunny condition or cloud
+     cover at or below 25%.
+      1. Snow / ice / freezing conditions               → Freeze Frame
+      2. Rain / drizzle / showers / thunder / storms    → Rain Check
+      3. Temperature below 15°C                         → Freeze Frame
+      4. Temperature above 32°C or UV above 7           → Sun Alert
+      5. Clear night                                    → Clear Night
+      6. 18–25°C with wind at or above 20 km/h          → Breezy Mode
+      7. 22–31°C with clear skies                       → Perfect Day
+      8. Remaining daytime weather                      → Perfect Day
+      9. Remaining night-time weather                   → Clear Night */
+  function clearSky(weather) {
+    const condition = String(weather.condition || "").toLowerCase();
+    if (
+      /rain|drizzle|shower|thunder|storm|snow|sleet|blizzard|freezing|fog|mist|haze|smoke|dust|sand/.test(
+        condition
+      )
+    ) {
+      return false;
+    }
+    return /\b(clear|sunny)\b/.test(condition) || Number(weather.cloud) <= 25;
+  }
+
   function deriveMood(weather) {
     const temperature = Number(weather.tempC);
     const wind = Number(weather.windKph);
+    const uv = Number(weather.uv);
     const condition = String(weather.condition || "").toLowerCase();
 
     if (/snow|blizzard|sleet|freezing|\bice\b/.test(condition)) return MOODS.cold;
-    if (/rain|drizzle|shower|thunder|storm/.test(condition)) return MOODS.rain;
+    if (/rain|drizzle|shower|thunder|storm/.test(condition)) return MOODS.rainy;
     if (temperature < THRESHOLDS.COLD_C) return MOODS.cold;
-    if (temperature > THRESHOLDS.HOT_C) return MOODS.hot;
-    if (wind >= THRESHOLDS.BREEZE_MIN_KPH) return MOODS.breeze;
-    return MOODS.clear;
+    if (temperature > THRESHOLDS.HOT_C || uv > THRESHOLDS.HOT_UV) return MOODS.scorching;
+    if (!weather.isDay && clearSky(weather)) return MOODS.night;
+    if (
+      wind >= THRESHOLDS.BREEZE_WIND_KPH &&
+      temperature >= THRESHOLDS.BREEZE_MIN_C &&
+      temperature <= THRESHOLDS.BREEZE_MAX_C
+    ) {
+      return MOODS.breezy;
+    }
+    if (
+      temperature >= THRESHOLDS.PLEASANT_MIN_C &&
+      temperature <= THRESHOLDS.PLEASANT_MAX_C &&
+      clearSky(weather)
+    ) {
+      return MOODS.pleasant;
+    }
+    return weather.isDay ? MOODS.pleasant : MOODS.night;
+  }
+
+  function currentMood() {
+    if (state.previewMood && MOODS[state.previewMood]) return MOODS[state.previewMood];
+    return state.weather ? deriveMood(state.weather) : MOODS.pleasant;
   }
 
   /* ----------------------------- Theme (sky) ----------------------------- */
 
   function applyTheme(moodKey) {
-    const key = GRADIENTS[moodKey] ? moodKey : "clear";
+    const key = MOODS[moodKey] ? moodKey : "pleasant";
     if (key === state.theme) {
       document.body.dataset.mood = key;
-      if (els.themeMeta) els.themeMeta.setAttribute("content", THEME_COLORS[key]);
+      if (els.themeMeta) els.themeMeta.setAttribute("content", MOODS[key].theme);
       return;
     }
 
     const outgoing = state.frontLayer === "a" ? els.skyA : els.skyB;
     const incoming = state.frontLayer === "a" ? els.skyB : els.skyA;
 
-    incoming.style.background = GRADIENTS[key];
+    incoming.style.background = MOODS[key].gradient;
     incoming.classList.add("is-active");
     outgoing.classList.remove("is-active");
 
     state.frontLayer = state.frontLayer === "a" ? "b" : "a";
     state.theme = key;
     document.body.dataset.mood = key;
-    if (els.themeMeta) els.themeMeta.setAttribute("content", THEME_COLORS[key]);
+    if (els.themeMeta) els.themeMeta.setAttribute("content", MOODS[key].theme);
   }
 
   /* ----------------------------- Rendering ----------------------------- */
 
   function updateClock() {
     if (!state.weather) return;
-    setText(els.localTime, clockLabel(Date.now() / 1000, state.weather.tz));
+    setText(els.localTime, `${clockLabel(Date.now() / 1000, state.weather.tz)} local`);
+    setText(
+      els.lastUpdatedPill,
+      `Updated ${clockLabel(state.weather.lastUpdatedEpoch, state.weather.tz)} local · ${relativeAgo(
+        state.weather.lastUpdatedEpoch
+      )}`
+    );
   }
 
   function uvDescriptor(uv) {
@@ -515,29 +685,45 @@
     return "Very humid";
   }
 
-  function renderVibe(weather) {
-    const mood = deriveMood(weather);
+  function updateMoodControls(mood) {
+    const live = !state.previewMood;
+    Array.from(els.moodOptions.querySelectorAll(".mood-pill")).forEach((pill) => {
+      const key = pill.dataset.mood;
+      const pressed = live ? key === "live" : key === mood.key;
+      pill.setAttribute("aria-pressed", String(pressed));
+    });
+  }
+
+  function renderMood() {
+    const mood = currentMood();
+    const preview = Boolean(state.previewMood);
+    const weather = state.weather;
 
     setText(els.vibeEmoji, mood.emoji);
     setText(els.vibeTitle, mood.title);
     setText(els.vibeText, mood.text);
     els.vibeCard.dataset.mood = mood.key;
-    els.vibeCard.dataset.emoji = mood.emoji;
+    els.previewBadge.hidden = !preview;
+    updateMoodControls(mood);
+    applyTheme(mood.key);
 
-    setText(
-      els.vibeReason,
-      `${weather.condition} · ${numberText(weather.tempC)}°C · ${numberText(weather.windKph, 1)} km/h wind`
-    );
-
-    return mood;
+    if (weather) {
+      setText(
+        els.vibeReason,
+        preview
+          ? `Preview · live sky is ${weather.condition.toLowerCase()} at ${numberText(weather.tempC)}°C`
+          : `${weather.condition} · ${numberText(weather.tempC)}°C · ${numberText(weather.windKph, 1)} km/h wind`
+      );
+    }
   }
 
   function renderCurrent(weather) {
     setText(els.cityName, weather.city || "—");
-    const region = [weather.region, weather.country].filter(Boolean).join(", ");
-    setText(els.region, region || "—");
+    setText(els.region, [weather.region, weather.country].filter(Boolean).join(", ") || "—");
     setText(els.tempC, numberText(weather.tempC));
     setText(els.condText, weather.condition || "—");
+    setText(els.feelsLikeHero, `Feels like ${numberText(weather.feelsLikeC)}°C`);
+    setText(els.highLow, `H ${numberText(weather.daily[0].maxC)}° · L ${numberText(weather.daily[0].minC)}°`);
     setIcon(els.condIcon, weather.conditionIcon, `${weather.condition || "Current"} weather icon`);
 
     setText(
@@ -545,11 +731,18 @@
       `Updated ${clockLabel(weather.lastUpdatedEpoch, weather.tz)} local · ${relativeAgo(weather.lastUpdatedEpoch)}`
     );
 
+    updateClock();
+  }
+
+  function renderMetrics(weather) {
     setText(els.humidity, `${numberText(weather.humidity)}%`);
     setText(els.humiditySub, humidityDescriptor(weather.humidity));
 
     setText(els.wind, `${numberText(weather.windKph, 1)} km/h`);
-    const windDetail = [weather.windDir, weather.gustKph !== null ? `gusts ${numberText(weather.gustKph, 1)} km/h` : ""]
+    const windDetail = [
+      weather.windDir,
+      weather.gustKph !== null ? `gusts ${numberText(weather.gustKph, 1)} km/h` : "",
+    ]
       .filter(Boolean)
       .join(" · ");
     setText(els.windSub, windDetail || "Calm");
@@ -557,17 +750,78 @@
     setText(els.uv, numberText(weather.uv, 1));
     setText(els.uvSub, uvDescriptor(weather.uv));
 
-    setText(els.cloud, `${numberText(weather.cloud)}%`);
-    setText(els.visibility, `${numberText(weather.visKm, 1)} km`);
-    setText(els.pressure, `${numberText(weather.pressureMb)} hPa`);
+    setText(els.feelsLike, `${numberText(weather.feelsLikeC)}°C`);
+    const difference = weather.feelsLikeC - weather.tempC;
     setText(
-      els.windDetail,
-      [numberText(weather.windKph, 1) + " km/h", weather.windDir].filter(Boolean).join(" ")
+      els.feelsLikeSub,
+      Math.abs(difference) < 0.6
+        ? "Matches the air temp"
+        : `${numberText(Math.abs(difference), 1)}° ${difference > 0 ? "warmer" : "cooler"} than actual`
     );
-    setText(els.tempF, `${numberText(weather.tempF, 1)}°F`);
-    setText(els.updated, `${clockLabel(weather.lastUpdatedEpoch, weather.tz)} local`);
+  }
 
-    updateClock();
+  function renderHourly(weather) {
+    const fragment = document.createDocumentFragment();
+
+    weather.hourly.forEach((hour, index) => {
+      const card = create("article", `hour-card${index === 0 ? " is-now" : ""}`);
+      const timeLabel = index === 0
+        ? "Now"
+        : formatInZone(hour.epoch, weather.tz, { hour: "numeric" });
+      const time = create("span", "hour-card__time", timeLabel);
+      const icon = makeIcon(
+        hour.conditionIcon,
+        `${hour.condition} forecast icon`,
+        "hour-card__icon",
+        38
+      );
+      const temp = create("span", "hour-card__temp", `${numberText(hour.tempC)}°`);
+      card.setAttribute(
+        "aria-label",
+        `${timeLabel}, ${hour.condition}, ${numberText(hour.tempC)} degrees, ${numberText(hour.chanceRain)}% chance of rain`
+      );
+      card.append(time, icon, temp);
+      fragment.appendChild(card);
+    });
+
+    els.hourlyTrack.replaceChildren(fragment);
+    updateScrollButtons();
+  }
+
+  function renderOutlook(weather) {
+    const fragment = document.createDocumentFragment();
+
+    weather.daily.forEach((day, index) => {
+      const item = create("li", "day");
+      const when = create("div", "day__when");
+      const dayName = index === 0 ? "Today" : index === 1 ? "Tomorrow" : forecastWeekday(day.date);
+      when.append(
+        create("span", "day__name", dayName),
+        create("span", "day__date", forecastDateLabel(day.date))
+      );
+
+      const icon = makeIcon(day.conditionIcon, `${day.condition} forecast icon`, "day__icon", 34);
+      const condition = create("div", "day__condition");
+      condition.append(
+        create("span", "day__text", day.condition),
+        create("span", "day__rain", `${numberText(day.chanceRain)}% chance of rain`)
+      );
+
+      const temps = create("div", "day__temps");
+      temps.append(
+        create("span", "day__high", `${numberText(day.maxC)}°`),
+        create("span", "day__low", `${numberText(day.minC)}°`)
+      );
+
+      item.setAttribute(
+        "aria-label",
+        `${dayName}, ${day.condition}, high ${numberText(day.maxC)} degrees, low ${numberText(day.minC)} degrees, ${numberText(day.chanceRain)}% chance of rain`
+      );
+      item.append(when, icon, condition, temps);
+      fragment.appendChild(item);
+    });
+
+    els.outlookList.replaceChildren(fragment);
   }
 
   function renderJsonPanel() {
@@ -578,14 +832,6 @@
     els.copyJsonBtn.disabled = !content;
     els.jsonPre.setAttribute("aria-label", `${tab === "raw" ? "Raw" : "Formatted"} JSON response`);
     updateTabs();
-
-    if (state.weather) {
-      const sizeKb = new Blob([raw || ""]).size / 1024;
-      setText(
-        els.jsonMeta,
-        `${state.weather.city} · ${numberText(sizeKb, 1)} KB · WeatherAPI /v1/current.json`
-      );
-    }
   }
 
   function updateTabs() {
@@ -605,15 +851,17 @@
 
   function renderWeather(weather, payload, rawText) {
     state.weather = weather;
+    state.previewMood = null;
 
-    const mood = renderVibe(weather);
     renderCurrent(weather);
+    renderMood();
+    renderMetrics(weather);
+    renderHourly(weather);
+    renderOutlook(weather);
 
     state.json.formatted = JSON.stringify(payload, null, 2);
     state.json.raw = rawText;
     renderJsonPanel();
-
-    applyTheme(mood.key);
 
     els.skeleton.hidden = true;
     els.fatal.hidden = true;
@@ -621,6 +869,7 @@
     els.content.classList.remove("is-updating", "just-updated");
     void els.content.offsetWidth;
     els.content.classList.add("just-updated");
+    updateScrollButtons();
 
     document.title = `${weather.city} ${numberText(weather.tempC)}° · SkyMood`;
     syncChips(state.requestedQuery, weather.city);
@@ -712,10 +961,7 @@
     hideBanner();
     setText(els.alertTitle, copy.title);
     setText(els.alertText, message);
-    setText(
-      els.alertNote,
-      `Still showing the last successful update for ${state.weather.city}.`
-    );
+    setText(els.alertNote, `Still showing the last successful update for ${state.weather.city}.`);
     els.alertNote.hidden = false;
     els.retryBtn.hidden = !copy.retryable;
     els.banner.hidden = false;
@@ -842,7 +1088,7 @@
     }
   }
 
-  /* ----------------------------- Chips / JSON / events ----------------------------- */
+  /* ----------------------------- Chips / mood lab / JSON / events ----------------------------- */
 
   function buildChips() {
     const fragment = document.createDocumentFragment();
@@ -863,18 +1109,63 @@
     els.chips.appendChild(fragment);
   }
 
-  function setJsonOpen(open) {
-    els.jsonPanel.hidden = !open;
-    els.jsonToggle.setAttribute("aria-expanded", String(open));
-    els.jsonToggle.setAttribute("aria-label", open ? "Hide API response" : "Show API response");
-    if (open) {
-      els.jsonSection.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+  function buildMoodOptions() {
+    const fragment = document.createDocumentFragment();
+
+    const live = create("button", "mood-pill mood-pill--live", "Live");
+    live.type = "button";
+    live.dataset.mood = "live";
+    live.setAttribute("aria-pressed", "true");
+    live.addEventListener("click", () => {
+      if (!state.weather) {
+        showToast("Live weather is still loading.");
+        return;
+      }
+      state.previewMood = null;
+      renderMood();
+      announce(`Live weather restored. ${currentMood().title}.`);
+    });
+    fragment.appendChild(live);
+
+    MOOD_ORDER.forEach((key) => {
+      const mood = MOODS[key];
+      const pill = create("button", "mood-pill");
+      pill.type = "button";
+      pill.dataset.mood = mood.key;
+      pill.setAttribute("aria-pressed", "false");
+      const dot = create("span", "mood-pill__dot");
+      dot.style.setProperty("--dot", mood.dot);
+      const label = create("span", null, mood.previewLabel);
+      pill.append(dot, label);
+      pill.addEventListener("click", () => {
+        if (!state.weather) {
+          showToast("Live weather is still loading.");
+          return;
+        }
+        state.previewMood = mood.key;
+        renderMood();
+        announce(`Previewing ${mood.title}. ${mood.text}`);
+      });
+      fragment.appendChild(pill);
+    });
+
+    els.moodOptions.appendChild(fragment);
   }
 
   function switchTab(tab) {
     state.json.tab = tab === "raw" ? "raw" : "formatted";
     renderJsonPanel();
+  }
+
+  function updateScrollButtons() {
+    const maxScroll = els.hourlyTrack.scrollWidth - els.hourlyTrack.clientWidth;
+    els.hourlyPrev.disabled = els.hourlyTrack.scrollLeft <= 1;
+    els.hourlyNext.disabled = maxScroll <= 1 || els.hourlyTrack.scrollLeft >= maxScroll - 1;
+  }
+
+  function scrollHourly(direction) {
+    const amount = Math.max(220, els.hourlyTrack.clientWidth * 0.8);
+    els.hourlyTrack.scrollBy({ left: direction * amount, behavior: "smooth" });
   }
 
   function bindEvents() {
@@ -901,19 +1192,22 @@
 
     els.dismissAlertBtn.addEventListener("click", hideBanner);
 
+    els.copyVibeBtn.addEventListener("click", async () => {
+      if (!state.weather) return;
+      const mood = currentMood();
+      const copied = await copyText(`${mood.title}: ${mood.text}`);
+      showToast(copied ? "Vibe copied to clipboard" : "Couldn't copy — select the text and copy manually.");
+    });
+
     els.copyJsonBtn.addEventListener("click", async () => {
       const content = state.json.tab === "raw" ? state.json.raw : state.json.formatted;
       if (!content) return;
       const copied = await copyText(content);
       showToast(
         copied
-          ? `${state.json.tab === "raw" ? "Raw" : "Formatted"} JSON copied`
-          : "Couldn't copy — select the JSON and copy manually."
+          ? `${state.json.tab === "raw" ? "Raw" : "Formatted"} data copied`
+          : "Couldn't copy — select the data and copy manually."
       );
-    });
-
-    els.jsonToggle.addEventListener("click", () => {
-      setJsonOpen(els.jsonPanel.hidden);
     });
 
     els.tabFormatted.addEventListener("click", () => switchTab("formatted"));
@@ -924,17 +1218,26 @@
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
         const next = tab === els.tabFormatted ? "raw" : "formatted";
-        const target =
-          event.key === "Home" ? "formatted" : event.key === "End" ? "raw" : next;
+        const target = event.key === "Home" ? "formatted" : event.key === "End" ? "raw" : next;
         switchTab(target);
         (target === "raw" ? els.tabRaw : els.tabFormatted).focus();
       });
     });
 
+    els.hourlyPrev.addEventListener("click", () => scrollHourly(-1));
+    els.hourlyNext.addEventListener("click", () => scrollHourly(1));
+    els.hourlyTrack.addEventListener("scroll", updateScrollButtons, { passive: true });
+
+    els.hourlyTrack.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      scrollHourly(event.key === "ArrowRight" ? 1 : -1);
+    });
+
+    window.addEventListener("resize", updateScrollButtons);
     window.addEventListener("offline", () => {
       showToast("You're offline. Weather updates are paused.");
     });
-
     window.addEventListener("online", () => {
       showToast("Back online.");
     });
@@ -952,8 +1255,9 @@
     state.initialized = true;
 
     buildChips();
+    buildMoodOptions();
     bindEvents();
-    applyTheme("clear");
+    applyTheme("pleasant");
 
     els.tempC.textContent = "—";
     loadCity(CONFIG.DEFAULT_CITY);
