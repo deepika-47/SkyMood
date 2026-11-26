@@ -225,7 +225,7 @@ Manual and scripted checks were run on **25–26 November 2026** in **Chromium 1
 5. **Only Chromium was tested.** Safari and Firefox were not executed in this environment.
 6. **No screen-reader session was performed.** Axe-core reported no WCAG A/AA violations, and keyboard behaviour was tested directly.
 7. **No automated test suite is committed.** The checks above were run with temporary Chromium DevTools Protocol scripts; adding Playwright coverage would be the next quality step.
-8. **The Vercel project is not Git-linked.** Deployments are driven by the Vercel CLI; GitHub pushes alone do not redeploy.
+8. **The Vercel project is not Git-linked.** Deployments are currently manual (Vercel CLI or REST API); GitHub pushes alone do not redeploy.
 9. The mood is an app-generated interpretation, **not safety advice**.
 
 ---
