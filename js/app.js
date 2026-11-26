@@ -116,8 +116,8 @@
     },
     night: {
       key: "night",
-      previewLabel: "Starry",
-      label: "Starry night",
+      previewLabel: "Clear night",
+      label: "Clear night",
       title: "Starry Night",
       emoji: "🌙",
       text: "Starry skies ahead—sleep tight!",
@@ -578,15 +578,14 @@
   /* Mood priority (first match wins). "Clear" means no rain/snow/fog/haze/
      smoke/dust in the condition and either a clear/sunny condition or cloud
      cover at or below 25%.
-      1. Snow / ice / freezing conditions               → Freeze Frame
-      2. Rain / drizzle / showers / thunder / storms    → Rain Check
-      3. Temperature below 15°C                         → Freeze Frame
+      1. Rain / drizzle / showers / thunder / storms    → Rain Check
+      2. Snow / ice / freezing, or below 15°C           → Freeze Frame
+      3. Clear night                                    → Starry Night
       4. Temperature above 32°C or UV above 7           → Sun Alert
-      5. Clear night                                    → Starry Night
-      6. 18–25°C with wind at or above 20 km/h          → Breezy Mode
-      7. 22–31°C with clear skies                       → Perfect Day
-      8. Remaining daytime weather                      → Perfect Day
-      9. Remaining night-time weather                   → Starry Night */
+      5. 18–25°C with wind at or above 20 km/h          → Breezy Mode
+      6. 22–31°C with clear skies                       → Perfect Day
+      7. Remaining daytime weather                      → Perfect Day
+      8. Remaining night-time weather                   → Starry Night */
   function clearSky(weather) {
     const condition = String(weather.condition || "").toLowerCase();
     if (
@@ -605,11 +604,12 @@
     const uv = Number(weather.uv);
     const condition = String(weather.condition || "").toLowerCase();
 
-    if (/snow|blizzard|sleet|freezing|\bice\b/.test(condition)) return MOODS.cold;
     if (/rain|drizzle|shower|thunder|storm/.test(condition)) return MOODS.rainy;
-    if (temperature < THRESHOLDS.COLD_C) return MOODS.cold;
-    if (temperature > THRESHOLDS.HOT_C || uv > THRESHOLDS.HOT_UV) return MOODS.scorching;
+    if (/snow|blizzard|sleet|freezing|\bice\b/.test(condition) || temperature < THRESHOLDS.COLD_C) {
+      return MOODS.cold;
+    }
     if (!weather.isDay && clearSky(weather)) return MOODS.night;
+    if (temperature > THRESHOLDS.HOT_C || uv > THRESHOLDS.HOT_UV) return MOODS.scorching;
     if (
       wind >= THRESHOLDS.BREEZE_WIND_KPH &&
       temperature >= THRESHOLDS.BREEZE_MIN_C &&

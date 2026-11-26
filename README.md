@@ -76,11 +76,11 @@ Priority is applied top-down; the first match wins. “Clear” means the condit
 
 | Priority | Mood | Rule |
 | --- | --- | --- |
-| 1 | **Cold** — Freeze Frame | Condition contains snow, blizzard, sleet, freezing or ice |
-| 2 | **Rainy** — Rain Check | Condition contains rain, drizzle, shower, thunder or storm |
+| 1 | **Rainy** — Rain Check | Condition contains rain, drizzle, shower, thunder or storm |
+| 2 | **Cold** — Freeze Frame | Condition contains snow, blizzard, sleet, freezing or ice |
 | 3 | **Cold** — Freeze Frame | Temperature **below 15°C** |
-| 4 | **Scorching** — Sun Alert | Temperature **above 32°C** or UV index **above 7** |
-| 5 | **Starry Night** | Night-time (`is_day = 0`) with a clear sky |
+| 4 | **Starry Night** | Night-time (`is_day = 0`) with a clear sky |
+| 5 | **Scorching** — Sun Alert | Temperature **above 32°C** or UV index **above 7** |
 | 6 | **Breezy** — Breezy Mode | Temperature **18–25°C inclusive** and wind **at least 20 km/h** |
 | 7 | **Pleasant** — Perfect Day | Temperature **22–31°C inclusive** with a clear sky |
 | 8 | **Pleasant** fallback | Any remaining daytime weather |
@@ -88,10 +88,9 @@ Priority is applied top-down; the first match wins. “Clear” means the condit
 
 Defined overlap behaviour:
 
-- Rain beats heat and cold: a 10°C rain shower is **Rainy**, and a 35°C thunderstorm is **Rainy**.
-- Snow/ice beats rain when both words appear, and beats temperature.
-- Cold beats heat: below 15°C wins even if UV is high.
-- A clear night beats Breezy: 20°C, clear, 30 km/h at night is **Starry Night**.
+- Rain beats snow and temperature: a 10°C rain shower is **Rainy**, and a condition naming both rain and snow is **Rainy**.
+- Cold beats heat when it is not raining: below 15°C wins even if UV is high.
+- A clear night beats Scorching and Breezy: a clear 20°C night with 30 km/h wind is **Starry Night**.
 - Breezy beats Pleasant: 25°C, clear, 20 km/h is **Breezy**.
 - Boundaries: 15°C is **not** Cold, 32°C and UV 7 are **not** Scorching, 18°C/25°C are inside Breezy, 22°C/31°C are inside Pleasant.
 - **20 km/h** is this app’s definition of “windy” for the Breezy mood.
@@ -177,7 +176,7 @@ The Vercel project is currently not Git-linked, so a GitHub push does **not** tr
 
 ## Verification
 
-Manual and scripted checks were run on **25–26 November 2026** in **Chromium 157** on Windows against the local server, plus the proxy function harness. Live WeatherAPI values changed between runs; the examples below are snapshots.
+Manual and scripted checks were run on **25–26 November 2026** in **Chromium 157–158** on Windows against the live deployment and local proxy harness. Live WeatherAPI values changed between runs; the examples below are snapshots.
 
 ### Requirement checklist
 
@@ -189,7 +188,7 @@ Manual and scripted checks were run on **25–26 November 2026** in **Chromium 1
 | Required presets | ✅ Passed | Chennai, London, Tokyo and New York each loaded their matching city, country, 24 hourly cards and five daily rows; their chips highlighted. |
 | Empty input | ✅ Passed | Inline error, `aria-invalid`, focus returned, no API request, previous city retained. |
 | Current hero | ✅ Passed | City, rounded `temp_c`, condition text/icon, feels-like, high/low, local time and last-updated time all rendered; UI values matched the live payload. |
-| Six moods | ✅ Passed | Controlled payloads produced Cold, Rainy, Scorching, Breezy, Pleasant and Starry Night as expected; snow, rain-over-heat, clear-night, breeze-over-pleasant and boundary overlaps were exercised. |
+| Six moods | ✅ Passed | Controlled payloads produced Rainy, Cold, Starry Night, Scorching, Breezy, Pleasant and fallbacks as expected; rain-over-snow, snow, rain-over-heat, clear-night-over-heat, clear-night-over-breeze, breeze-over-pleasant and boundary overlaps were exercised. |
 | Exact recommendation copy | ✅ Passed | All six strings matched character-for-character, including em dashes. |
 | Six exact gradients | ✅ Passed | Every mood and every preview produced exactly one active layer with the required computed gradient. |
 | 0.6s sky transition | ✅ Passed | Computed `transition-property: opacity`, `transition-duration: 0.6s`, `transition-timing-function: ease-in-out`. |
@@ -206,7 +205,7 @@ Manual and scripted checks were run on **25–26 November 2026** in **Chromium 1
 | Loading states | ✅ Passed | Skeleton before the first response; dimmed content plus loading chip for later requests; `aria-busy` toggled correctly. |
 | Error states | ✅ Passed | Controlled network failure, 429, invalid key, 502, malformed 200, hanging request and stale response all produced the intended UI; prior data was retained. |
 | Proxy contract | ✅ Passed | Success 200 with `X-Weather-Endpoint: /v1/forecast.json`, five days, no key in the body; 400, 404, 405 and 500 paths mapped correctly. |
-| No client-side key | ✅ Passed | Browser traffic only reached `/api/weather`; the response did not contain the WeatherAPI key. |
+| No client-side key | ✅ Passed | Weather traffic only reached `/api/weather`; no browser request hit `api.weatherapi.com`, and the response did not contain the WeatherAPI key. |
 | JSON viewer | ✅ Passed | Formatted and raw views of the assembled forecast payload, copy action, tab keyboard support and scrollable panel. |
 | Separate HTML/CSS/JS | ✅ Passed | No inline application logic; `index.html` links `css/styles.css` and `js/app.js`. |
 
