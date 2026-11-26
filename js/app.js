@@ -116,9 +116,9 @@
     },
     night: {
       key: "night",
-      previewLabel: "Clear night",
-      label: "Clear night",
-      title: "Clear Night",
+      previewLabel: "Starry",
+      label: "Starry night",
+      title: "Starry Night",
       emoji: "🌙",
       text: "Starry skies ahead—sleep tight!",
       gradient: "linear-gradient(180deg, #0F172A 0%, #1E1B4B 100%)",
@@ -582,11 +582,11 @@
       2. Rain / drizzle / showers / thunder / storms    → Rain Check
       3. Temperature below 15°C                         → Freeze Frame
       4. Temperature above 32°C or UV above 7           → Sun Alert
-      5. Clear night                                    → Clear Night
+      5. Clear night                                    → Starry Night
       6. 18–25°C with wind at or above 20 km/h          → Breezy Mode
       7. 22–31°C with clear skies                       → Perfect Day
       8. Remaining daytime weather                      → Perfect Day
-      9. Remaining night-time weather                   → Clear Night */
+      9. Remaining night-time weather                   → Starry Night */
   function clearSky(weather) {
     const condition = String(weather.condition || "").toLowerCase();
     if (
