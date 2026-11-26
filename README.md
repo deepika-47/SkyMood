@@ -2,7 +2,7 @@
 
 **Know the sky, plan your day.**
 
-SkyMood is a mobile-first lifestyle weather app. Live conditions become one of **six dynamic moods**, each with its own full-screen gradient and a deliberately short recommendation. The page also carries a 24-hour forecast strip, a five-day outlook, four quick metrics and a mood-preview lab.
+SkyMood is a mobile-first lifestyle weather app. Live conditions become one of **six dynamic moods** (with an **Easy Going** fallback for in-between skies), each with its own full-screen gradient and a deliberately short recommendation. The page also carries a 24-hour forecast strip, a five-day outlook, four quick metrics and a mood-preview lab.
 
 - **Live app:** <https://skymood-eight.vercel.app>
 - **Source:** <https://github.com/deepika-47/SkyMood>
@@ -18,7 +18,7 @@ No login, profiles, history, database or notifications. The WeatherAPI key stays
 - Searches by **button or Enter**, accepts repeated searches, blocks empty input and keeps the typed city in the field.
 - Offers eleven presets: **Mumbai, Chennai, London, Tokyo, New York, Delhi, Bengaluru, Hyderabad, Kolkata, Pune, Ahmedabad**.
 - Shows the city, region/country, current temperature in **°C**, condition text and icon, city-local time, feels-like, high/low and last-updated time.
-- Produces one of six moods with the exact copy below: **Scorching, Pleasant, Breezy, Rainy, Cold, Starry Night**.
+- Produces one of six moods — **Scorching, Pleasant, Breezy, Rainy, Cold, Starry Night** — plus an **Easy Going** fallback when none match, using the exact copy below.
 - Includes a **Mood lab** that previews all six gradients and recommendations without changing any live measurement.
 - Renders the next **24 hours** in a horizontally scrollable glass strip (time, icon, temperature).
 - Renders a **five-day outlook** with weekday, date, condition, rain chance and high/low.
@@ -66,6 +66,8 @@ Cold        linear-gradient(180deg, #1E3A8A 0%, #312E81 100%)
 Starry Night linear-gradient(180deg, #0F172A 0%, #1E1B4B 100%)
 ```
 
+Easy Going reuses the Pleasant gradient; it is a fallback title, not a seventh preview.
+
 The mood lab changes **only** the sky, the recommendation card and its preview badge. Temperature, humidity, wind, UV, feels-like, hourly data and the five-day outlook stay bound to the live payload until the next search.
 
 ---
@@ -76,24 +78,24 @@ Priority is applied top-down; the first match wins. “Clear” means the condit
 
 | Priority | Mood | Rule |
 | --- | --- | --- |
-| 1 | **Rainy** — Rain Check | Condition contains rain, drizzle, shower, thunder or storm |
-| 2 | **Cold** — Freeze Frame | Condition contains snow, blizzard, sleet, freezing or ice |
+| 1 | **Rainy** — Rain Check | Condition contains rain, drizzle, shower, thunder, storm or sleet |
+| 2 | **Cold** — Freeze Frame | Condition contains snow, blizzard, freezing or ice |
 | 3 | **Cold** — Freeze Frame | Temperature **below 15°C** |
 | 4 | **Starry Night** | Night-time (`is_day = 0`) with a clear sky |
 | 5 | **Scorching** — Sun Alert | Temperature **above 32°C** or UV index **above 7** |
 | 6 | **Breezy** — Breezy Mode | Temperature **18–25°C inclusive** and wind **at least 20 km/h** |
 | 7 | **Pleasant** — Perfect Day | Temperature **22–31°C inclusive** with a clear sky |
-| 8 | **Pleasant** fallback | Any remaining daytime weather |
-| 9 | **Starry Night** fallback | Any remaining night-time weather |
+| Fallback | **Easy Going** | Any remaining conditions, including mild haze or overcast skies |
 
 Defined overlap behaviour:
 
-- Rain beats snow and temperature: a 10°C rain shower is **Rainy**, and a condition naming both rain and snow is **Rainy**.
+- Rain beats snow and temperature: a 10°C rain shower is **Rainy**, and a condition naming both rain and snow is **Rainy**. Sleet counts as rain.
 - Cold beats heat when it is not raining: below 15°C wins even if UV is high.
 - A clear night beats Scorching and Breezy: a clear 20°C night with 30 km/h wind is **Starry Night**.
 - Breezy beats Pleasant: 25°C, clear, 20 km/h is **Breezy**.
 - Boundaries: 15°C is **not** Cold, 32°C and UV 7 are **not** Scorching, 18°C/25°C are inside Breezy, 22°C/31°C are inside Pleasant.
 - **20 km/h** is this app’s definition of “windy” for the Breezy mood.
+- **Easy Going** avoids claiming “clear skies” when the sky is hazy or overcast.
 
 Exact recommendation copy:
 
@@ -103,6 +105,7 @@ Exact recommendation copy:
 - **Rainy / Drizzle / Storm:** “Step out with an umbrella—don't get soaked!”
 - **Cold:** “Bone-chilling cold outside—cuddle up tight!”
 - **Starry Night:** “Starry skies ahead—sleep tight!”
+- **Easy Going** fallback: “Mild and steady—a good day to head outside!”
 
 The mood is an app-generated interpretation, **not safety advice**.
 
@@ -188,7 +191,7 @@ Manual and scripted checks were run on **25–26 November 2026** in **Chromium 1
 | Required presets | ✅ Passed | Chennai, London, Tokyo and New York each loaded their matching city, country, 24 hourly cards and five daily rows; their chips highlighted. |
 | Empty input | ✅ Passed | Inline error, `aria-invalid`, focus returned, no API request, previous city retained. |
 | Current hero | ✅ Passed | City, rounded `temp_c`, condition text/icon, feels-like, high/low, local time and last-updated time all rendered; UI values matched the live payload. |
-| Six moods | ✅ Passed | Controlled payloads produced Rainy, Cold, Starry Night, Scorching, Breezy, Pleasant and fallbacks as expected; rain-over-snow, snow, rain-over-heat, clear-night-over-heat, clear-night-over-breeze, breeze-over-pleasant and boundary overlaps were exercised. |
+| Six moods | ✅ Passed | Controlled payloads produced Rainy, Cold, Starry Night, Scorching, Breezy, Pleasant and the Easy Going fallback as expected; sleet-as-rain, rain-over-snow, snow, rain-over-heat, clear-night-over-heat, clear-night-over-breeze, breeze-over-pleasant and boundary overlaps were exercised. |
 | Exact recommendation copy | ✅ Passed | All six strings matched character-for-character, including em dashes. |
 | Six exact gradients | ✅ Passed | Every mood and every preview produced exactly one active layer with the required computed gradient. |
 | 0.6s sky transition | ✅ Passed | Computed `transition-property: opacity`, `transition-duration: 0.6s`, `transition-timing-function: ease-in-out`. |

@@ -127,6 +127,14 @@
     },
   });
 
+  /* Used when live conditions fall between the six defined moods. Reuses the
+     Pleasant sky but avoids claiming "clear skies" when it is hazy/overcast. */
+  const FALLBACK_VIBE = Object.freeze({
+    ...MOODS.pleasant,
+    title: "Easy Going",
+    text: "Mild and steady—a good day to head outside!",
+  });
+
   const MOOD_ORDER = Object.freeze(["scorching", "pleasant", "breezy", "rainy", "cold", "night"]);
 
   const GENERIC_ICON =
@@ -578,14 +586,13 @@
   /* Mood priority (first match wins). "Clear" means no rain/snow/fog/haze/
      smoke/dust in the condition and either a clear/sunny condition or cloud
      cover at or below 25%.
-      1. Rain / drizzle / showers / thunder / storms    → Rain Check
+      1. Rain / drizzle / showers / thunder / storms / sleet → Rain Check
       2. Snow / ice / freezing, or below 15°C           → Freeze Frame
       3. Clear night                                    → Starry Night
       4. Temperature above 32°C or UV above 7           → Sun Alert
       5. 18–25°C with wind at or above 20 km/h          → Breezy Mode
       6. 22–31°C with clear skies                       → Perfect Day
-      7. Remaining daytime weather                      → Perfect Day
-      8. Remaining night-time weather                   → Starry Night */
+      7. Remaining conditions                           → Easy Going */
   function clearSky(weather) {
     const condition = String(weather.condition || "").toLowerCase();
     if (
@@ -604,8 +611,8 @@
     const uv = Number(weather.uv);
     const condition = String(weather.condition || "").toLowerCase();
 
-    if (/rain|drizzle|shower|thunder|storm/.test(condition)) return MOODS.rainy;
-    if (/snow|blizzard|sleet|freezing|\bice\b/.test(condition) || temperature < THRESHOLDS.COLD_C) {
+    if (/rain|drizzle|shower|thunder|storm|sleet/.test(condition)) return MOODS.rainy;
+    if (/snow|blizzard|freezing|\bice\b/.test(condition) || temperature < THRESHOLDS.COLD_C) {
       return MOODS.cold;
     }
     if (!weather.isDay && clearSky(weather)) return MOODS.night;
@@ -624,7 +631,7 @@
     ) {
       return MOODS.pleasant;
     }
-    return weather.isDay ? MOODS.pleasant : MOODS.night;
+    return FALLBACK_VIBE;
   }
 
   function currentMood() {
